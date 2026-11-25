@@ -134,17 +134,13 @@ LOADER
 cat > /boot/loader/entries/01-vaporos-gaming.conf <<ENTRY
 title   VaporOS (Gaming Mode)
 linux   /vmlinuz-linux-zen
-initrd  /intel-ucode.img
-initrd  /amd-ucode.img
 initrd  /initramfs-linux-zen.img
 options root=UUID=${ROOT_UUID} rootflags=subvol=@ rw quiet loglevel=3 vaporos.mode=gaming
 ENTRY
 
 cat > /boot/loader/entries/02-vaporos-desktop.conf <<ENTRY
-title   VaporOS (Desktop Mode — Hyprland)
+title   VaporOS (Desktop Mode - Hyprland)
 linux   /vmlinuz-linux-zen
-initrd  /intel-ucode.img
-initrd  /amd-ucode.img
 initrd  /initramfs-linux-zen.img
 options root=UUID=${ROOT_UUID} rootflags=subvol=@ rw quiet loglevel=3 vaporos.mode=desktop
 ENTRY
