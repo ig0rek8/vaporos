@@ -7,7 +7,11 @@
 # --- Base System & Low-Latency Gaming Kernel ---
 base
 linux-zen
-linux-firmware
+linux-firmware-amdgpu
+linux-firmware-intel
+linux-firmware-realtek
+linux-firmware-atheros
+linux-firmware-mediatek
 amd-ucode
 intel-ucode
 mkinitcpio
@@ -62,12 +66,11 @@ gamemode
 lib32-gamemode
 ttf-liberation
 ttf-dejavu
-noto-fonts
-noto-fonts-emoji
 ttf-jetbrains-mono-nerd
 
 # --- Login / Session Manager (Ultra-light, ~3MB RAM) ---
 greetd
+greetd-tuigreet
 
 # --- Desktop Mode (Hyprland Wayland — Minimal & Fast) ---
 hyprland

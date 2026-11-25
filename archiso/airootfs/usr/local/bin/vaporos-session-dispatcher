@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # VaporOS Session Dispatcher
-# Seamlessly switches between Gaming Mode (gamescope + Steam Big Picture)
-# and Desktop Mode (Hyprland Wayland) without rebooting or a heavy DM.
+# Defaults to Desktop Mode (normal Arch Linux + Hyprland).
+# Inside the system, users can switch to Gaming Mode (gamescope + Steam)
+# and back seamlessly without rebooting.
 # ==============================================================================
 set -u
 
@@ -18,33 +19,31 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
-# Respect kernel boot parameter (vaporos.mode=desktop | gaming) on initial login
+# Respect kernel boot parameter (default: desktop)
 if [[ ! -f "$NEXT_SESSION_FILE" ]]; then
-    if grep -qw "vaporos.mode=desktop" /proc/cmdline 2>/dev/null; then
-        echo "desktop" > "$NEXT_SESSION_FILE"
-    else
+    if grep -qw "vaporos.mode=gaming" /proc/cmdline 2>/dev/null; then
         echo "gaming" > "$NEXT_SESSION_FILE"
+    elif grep -qw "vaporos.mode=tty" /proc/cmdline 2>/dev/null; then
+        echo "tty" > "$NEXT_SESSION_FILE"
+    else
+        echo "desktop" > "$NEXT_SESSION_FILE"
     fi
 fi
 
 # Ensure user PipeWire audio daemon is ready
 systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service 2>/dev/null || true
 
-CONSECUTIVE_GAMING_FAILS=0
-
 while true; do
-    TARGET_MODE="$(tr -d '[:space:]' < "$NEXT_SESSION_FILE" 2>/dev/null || echo "gaming")"
+    TARGET_MODE="$(tr -d '[:space:]' < "$NEXT_SESSION_FILE" 2>/dev/null || echo "desktop")"
     rm -f "$SWITCH_FLAG"
 
     case "$TARGET_MODE" in
-        desktop)
-            log "Starting Desktop Mode (Hyprland)"
-            CONSECUTIVE_GAMING_FAILS=0
-            /usr/local/bin/vaporos-desktop-session >> "$LOG_FILE" 2>&1
-            EXIT_CODE=$?
-            log "Desktop Mode exited with code $EXIT_CODE"
+        tty)
+            echo "VaporOS Safe Shell (user: gamer | pass: gamer)"
+            echo "Run 'vaporos-desktop-session' for Hyprland or 'vaporos-gaming-session' for Gaming Mode."
+            exec /usr/bin/bash --login
             ;;
-        gaming|*)
+        gaming)
             log "Starting Gaming Mode (gamescope + Steam Big Picture)"
             START_TS=$(date +%s)
             /usr/local/bin/vaporos-gaming-session >> "$LOG_FILE" 2>&1
@@ -53,26 +52,37 @@ while true; do
             DURATION=$((END_TS - START_TS))
             log "Gaming Mode exited with code $EXIT_CODE after ${DURATION}s"
 
-            # Safety fallback: if gamescope fails immediately (e.g. VM without Vulkan),
-            # automatically fall back to Desktop Mode instead of boot-looping.
-            if [[ ! -f "$SWITCH_FLAG" && $DURATION -lt 8 ]]; then
-                CONSECUTIVE_GAMING_FAILS=$((CONSECUTIVE_GAMING_FAILS + 1))
-                if [[ $CONSECUTIVE_GAMING_FAILS -ge 2 ]]; then
-                    log "Gaming Mode failed repeatedly; falling back to Desktop Mode"
-                    echo "desktop" > "$NEXT_SESSION_FILE"
-                    touch "$SWITCH_FLAG"
+            # Always return to Desktop Mode if gamescope exits or fails
+            if [[ ! -f "$SWITCH_FLAG" ]]; then
+                echo "desktop" > "$NEXT_SESSION_FILE"
+                touch "$SWITCH_FLAG"
+            fi
+            ;;
+        desktop|*)
+            log "Starting Desktop Mode (Hyprland)"
+            START_TS=$(date +%s)
+            /usr/local/bin/vaporos-desktop-session >> "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            END_TS=$(date +%s)
+            DURATION=$((END_TS - START_TS))
+            log "Desktop Mode exited with code $EXIT_CODE after ${DURATION}s"
+
+            # If user didn't request switching to Gaming Mode:
+            if [[ ! -f "$SWITCH_FLAG" ]]; then
+                if [[ $DURATION -lt 5 && $EXIT_CODE -ne 0 ]]; then
+                    echo ""
+                    echo "=== VaporOS: Hyprland failed to start (exit $EXIT_CODE) ==="
+                    echo "Log: $LOG_FILE"
+                    tail -n 15 "$LOG_FILE" 2>/dev/null || true
+                    echo ""
+                    echo "Dropping to interactive bash shell. You can run 'vaporos-ctl' or 'Hyprland'."
+                    exec /usr/bin/bash --login
                 fi
-            else
-                CONSECUTIVE_GAMING_FAILS=0
+                # Clean logout -> return to greetd (tuigreet)
+                exit 0
             fi
             ;;
     esac
 
-    # If a session switch was requested, loop immediately into the new mode.
-    # Otherwise, short pause and restart the configured mode.
-    if [[ -f "$SWITCH_FLAG" ]]; then
-        sleep 0.5
-    else
-        sleep 1
-    fi
+    sleep 0.5
 done

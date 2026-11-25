@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # VaporOS First-Boot Initializer
-# Ensures /home/gamer exists with all VaporOS configs from /etc/skel.
+# Creates user 'gamer' (password: gamer) without overriding Arch system users,
+# and seeds /home/gamer from /etc/skel.
 # ==============================================================================
 set -euo pipefail
 
-if [[ ! -d /home/gamer ]]; then
-    mkdir -p /home/gamer
+# Ensure root has a known live password (vaporos)
+echo "root:vaporos" | chpasswd
+
+# Create gamer user if it does not exist yet
+if ! id -u gamer >/dev/null 2>&1; then
+    for grp in wheel video audio input render storage gamemode; do
+        getent group "$grp" >/dev/null 2>&1 || groupadd "$grp"
+    done
+    useradd -m -G wheel,video,audio,input,render,storage,gamemode -s /usr/bin/bash gamer
+    echo "gamer:gamer" | chpasswd
 fi
 
 if [[ ! -f /home/gamer/.vaporos-initialized ]]; then
+    mkdir -p /home/gamer
     cp -a /etc/skel/. /home/gamer/
     chown -R gamer:gamer /home/gamer
     touch /home/gamer/.vaporos-initialized

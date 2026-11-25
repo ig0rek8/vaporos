@@ -1,11 +1,11 @@
-# VaporOS greetd configuration — ultra-light auto-login (~3 MB RAM)
+# VaporOS greetd configuration — auto-login into Desktop Mode, tuigreet on logout
 [terminal]
 vt = 1
-
-[default_session]
-command = "/usr/local/bin/vaporos-session-dispatcher"
-user = "gamer"
 
 [initial_session]
 command = "/usr/local/bin/vaporos-session-dispatcher"
 user = "gamer"
+
+[default_session]
+command = "tuigreet --time --remember --greeting 'VaporOS (Arch Linux) — user: gamer / pass: gamer' --cmd /usr/local/bin/vaporos-session-dispatcher"
+user = "greeter"

@@ -70,7 +70,7 @@ mount "$EFI_PART" /mnt/boot
 
 echo "[3/6] Installing VaporOS base & gaming stack..."
 pacstrap -K /mnt \
-    base linux-zen linux-firmware amd-ucode intel-ucode \
+    base linux-zen linux-firmware-amdgpu linux-firmware-intel linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek amd-ucode intel-ucode \
     btrfs-progs zram-generator sudo polkit \
     networkmanager iwd bluez bluez-utils openssh curl \
     pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber lib32-pipewire lib32-libpulse \
@@ -78,8 +78,8 @@ pacstrap -K /mnt \
     vulkan-icd-loader lib32-vulkan-icd-loader vulkan-mesa-layers lib32-vulkan-mesa-layers \
     intel-media-driver \
     gamescope steam mangohud lib32-mangohud gamemode lib32-gamemode \
-    ttf-liberation ttf-dejavu noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
-    greetd hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
+    ttf-liberation ttf-dejavu ttf-jetbrains-mono-nerd \
+    greetd greetd-tuigreet hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     qt5-wayland qt6-wayland waybar fuzzel foot mako libnotify wl-clipboard \
     grim slurp brightnessctl playerctl pavucontrol thunar gvfs swaybg polkit-gnome \
     bash-completion git htop nano jq pciutils usbutils unzip zstd
@@ -115,16 +115,17 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "vaporos" > /etc/hostname
 
 useradd -m -G wheel,video,audio,input,render,storage,gamemode -s /usr/bin/bash gamer
-passwd -d gamer
+echo "gamer:gamer" | chpasswd
 
 systemctl enable NetworkManager.service
 systemctl enable bluetooth.service
 systemctl enable greetd.service
 systemctl enable vaporos-firstboot.service
+systemctl mask getty@tty1.service
 
 bootctl install
 cat > /boot/loader/loader.conf <<LOADER
-default 01-vaporos-gaming.conf
+default 02-vaporos-desktop.conf
 timeout 3
 console-mode max
 editor no

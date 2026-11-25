@@ -33,6 +33,8 @@ ln -sf /usr/lib/systemd/system/bluetooth.service "$WANTS_DIR/bluetooth.service"
 ln -sf /usr/lib/systemd/system/greetd.service "$WANTS_DIR/greetd.service"
 ln -sf /etc/systemd/system/vaporos-firstboot.service "$WANTS_DIR/vaporos-firstboot.service"
 ln -sf /usr/lib/systemd/system/multi-user.target "$SYSTEMD_DIR/default.target"
+# Prevent getty@tty1 from fighting greetd on VT1
+ln -sf /dev/null "$SYSTEMD_DIR/getty@tty1.service"
 
 # Ensure executable bits on custom scripts
 chmod 755 \
