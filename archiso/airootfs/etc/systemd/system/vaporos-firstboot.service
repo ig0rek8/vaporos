@@ -1,0 +1,12 @@
+[Unit]
+Description=VaporOS First-Boot User Configuration
+Before=greetd.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vaporos-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

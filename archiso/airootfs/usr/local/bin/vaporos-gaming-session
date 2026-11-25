@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VaporOS Gaming Mode Session
+# Launches Gamescope compositor + Steam Big Picture (SteamOS 3 UI)
+# Optimized for AMD (RADV) & Intel (ANV) open-source Mesa drivers.
+# ==============================================================================
+set -u
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=gamescope
+export XDG_SESSION_DESKTOP=vaporos-gaming
+
+# Graphics & Vulkan optimizations (AMD RADV / Intel ANV)
+export AMD_VULKAN_ICD=RADV
+export RADV_PERFTEST=gpl
+export ENABLE_GAMESCOPE_WSI=1
+export MANGOHUD_CONFIGFILE="${XDG_CONFIG_HOME:-$HOME/.config}/MangoHud/MangoHud.conf"
+export SDL_VIDEODRIVER=x11
+export STEAM_DISABLE_AUDIO_DEVICE_SWITCHING=0
+export STEAM_MULTIPLE_XWAYLANDS=1
+export GAMESCOPE_WAYLAND_DISPLAY=gamescope-0
+
+# Optional user overrides (e.g., resolution, refresh rate, extra flags)
+USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/vaporos/gaming.conf"
+# shellcheck source=/dev/null
+[[ -f "$USER_CONF" ]] && source "$USER_CONF"
+
+# Auto-detect primary connected display resolution if not pinned by user
+detect_display() {
+    local mode=""
+    for status_file in /sys/class/drm/card*-*/status; do
+        [[ -r "$status_file" ]] || continue
+        if [[ "$(cat "$status_file")" == "connected" ]]; then
+            local modes_file="${status_file%/status}/modes"
+            if [[ -r "$modes_file" ]]; then
+                mode="$(head -n 1 "$modes_file")"
+                break
+            fi
+        fi
+    done
+
+    if [[ "$mode" =~ ^([0-9]+)x([0-9]+) ]]; then
+        DETECTED_W="${BASH_REMATCH[1]}"
+        DETECTED_H="${BASH_REMATCH[2]}"
+    else
+        DETECTED_W=1920
+        DETECTED_H=1080
+    fi
+}
+
+detect_display
+OUT_W="${VAPOROS_WIDTH:-$DETECTED_W}"
+OUT_H="${VAPOROS_HEIGHT:-$DETECTED_H}"
+OUT_R="${VAPOROS_REFRESH:-60}"
+
+# Switch CPU governor to performance if permitted
+if command -v cpupower >/dev/null 2>&1; then
+    sudo -n cpupower frequency-set -g performance >/dev/null 2>&1 || true
+elif [[ -w /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
+    for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        echo performance > "$gov" 2>/dev/null || true
+    done
+fi
+
+GAMESCOPE_ARGS=(
+    -W "$OUT_W"
+    -H "$OUT_H"
+    -r "$OUT_R"
+    -e
+    -f
+    --steam
+    --adaptive-sync
+    --mangoapp
+)
+
+# Append any custom user flags
+if [[ -n "${VAPOROS_GAMESCOPE_EXTRA:-}" ]]; then
+    # shellcheck disable=SC2206
+    GAMESCOPE_ARGS+=(${VAPOROS_GAMESCOPE_EXTRA})
+fi
+
+STEAM_ARGS=(
+    -gamepadui
+    -steamos3
+    -steampal
+    -steamdeck
+    -tenfoot
+)
+
+exec gamescope "${GAMESCOPE_ARGS[@]}" -- steam "${STEAM_ARGS[@]}"

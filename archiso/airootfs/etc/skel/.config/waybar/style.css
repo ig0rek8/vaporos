@@ -1,0 +1,61 @@
+* {
+    font-family: "JetBrainsMono Nerd Font", "DejaVu Sans", sans-serif;
+    font-size: 13px;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background-color: #0e141b;
+    color: #dbe6f0;
+    border-bottom: 1px solid #1e2a38;
+}
+
+#custom-gaming {
+    background-color: #1a9fff;
+    color: #0b1117;
+    font-weight: bold;
+    padding: 0 12px;
+    margin: 4px 6px 4px 8px;
+    border-radius: 6px;
+}
+
+#custom-gaming:hover {
+    background-color: #4bb4ff;
+}
+
+#custom-vaporctl {
+    background-color: #1c2734;
+    color: #66c0f4;
+    padding: 0 10px;
+    margin: 4px 2px;
+    border-radius: 6px;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    color: #8f98a0;
+    background: transparent;
+}
+
+#workspaces button.active {
+    color: #1a9fff;
+    border-bottom: 2px solid #1a9fff;
+}
+
+#clock {
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#cpu, #memory, #pulseaudio, #network, #battery {
+    padding: 0 10px;
+    margin: 4px 2px;
+    background-color: #16202a;
+    border-radius: 6px;
+    color: #c7d5e0;
+}
+
+#network.disconnected {
+    color: #e06c75;
+}

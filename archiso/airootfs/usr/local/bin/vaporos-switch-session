@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VaporOS Session Switcher
+# Usage: vaporos-switch-session [gaming|desktop]
+# ==============================================================================
+set -euo pipefail
+
+TARGET="${1:-}"
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vaporos"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+mkdir -p "$STATE_DIR" "$CACHE_DIR"
+
+case "$TARGET" in
+    gaming|gamescope|steam)
+        echo "gaming" > "$STATE_DIR/next-session"
+        touch "$CACHE_DIR/vaporos-switch-requested"
+        # Cleanly exit Hyprland if running
+        if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || pgrep -x Hyprland >/dev/null 2>&1; then
+            hyprctl dispatch exit >/dev/null 2>&1 || pkill -TERM -x Hyprland || true
+        fi
+        ;;
+    desktop|hyprland|plasma)
+        echo "desktop" > "$STATE_DIR/next-session"
+        touch "$CACHE_DIR/vaporos-switch-requested"
+        # Cleanly shut down Steam & gamescope
+        if pgrep -x steam >/dev/null 2>&1; then
+            steam -shutdown >/dev/null 2>&1 || true
+            sleep 1
+        fi
+        pkill -TERM -x gamescope >/dev/null 2>&1 || true
+        ;;
+    *)
+        echo "Usage: vaporos-switch-session [gaming|desktop]" >&2
+        exit 1
+        ;;
+esac

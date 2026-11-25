@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VaporOS First-Boot Initializer
+# Ensures /home/gamer exists with all VaporOS configs from /etc/skel.
+# ==============================================================================
+set -euo pipefail
+
+if [[ ! -d /home/gamer ]]; then
+    mkdir -p /home/gamer
+fi
+
+if [[ ! -f /home/gamer/.vaporos-initialized ]]; then
+    cp -a /etc/skel/. /home/gamer/
+    chown -R gamer:gamer /home/gamer
+    touch /home/gamer/.vaporos-initialized
+    chown gamer:gamer /home/gamer/.vaporos-initialized
+fi

@@ -1,0 +1,106 @@
+# ==============================================================================
+# VaporOS Minimal Package List (x86_64)
+# Target: Ultra-low RAM, zero bloat, AMD + Intel Mesa open drivers,
+#         Steam Big Picture (gamescope) + Hyprland Desktop Mode.
+# ==============================================================================
+
+# --- Base System & Low-Latency Gaming Kernel ---
+base
+linux-zen
+linux-firmware
+amd-ucode
+intel-ucode
+mkinitcpio
+mkinitcpio-archiso
+arch-install-scripts
+syslinux
+systemd-boot-pacman-hook
+efibootmgr
+btrfs-progs
+dosfstools
+parted
+zram-generator
+sudo
+polkit
+
+# --- Networking & Bluetooth ---
+networkmanager
+iwd
+bluez
+bluez-utils
+openssh
+curl
+ca-certificates
+
+# --- Audio (PipeWire minimal stack) ---
+pipewire
+pipewire-alsa
+pipewire-pulse
+pipewire-jack
+wireplumber
+lib32-pipewire
+lib32-libpulse
+
+# --- Graphics: Open-Source AMD + Intel (Mesa & Vulkan 64/32-bit) ---
+mesa
+lib32-mesa
+vulkan-radeon
+lib32-vulkan-radeon
+vulkan-intel
+lib32-vulkan-intel
+vulkan-icd-loader
+lib32-vulkan-icd-loader
+vulkan-mesa-layers
+lib32-vulkan-mesa-layers
+libva-mesa-driver
+lib32-libva-mesa-driver
+intel-media-driver
+
+# --- Gaming Mode (Gamescope + Steam + Performance Tools) ---
+gamescope
+steam
+mangohud
+lib32-mangohud
+gamemode
+lib32-gamemode
+ttf-liberation
+ttf-dejavu
+noto-fonts
+noto-fonts-emoji
+ttf-jetbrains-mono-nerd
+
+# --- Login / Session Manager (Ultra-light, ~3MB RAM) ---
+greetd
+
+# --- Desktop Mode (Hyprland Wayland — Minimal & Fast) ---
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+qt5-wayland
+qt6-wayland
+waybar
+fuzzel
+foot
+mako
+libnotify
+wl-clipboard
+grim
+slurp
+brightnessctl
+playerctl
+pavucontrol
+thunar
+gvfs
+swaybg
+polkit-gnome
+
+# --- Essential CLI Utilities (No Bloat) ---
+bash-completion
+git
+htop
+nano
+jq
+pciutils
+usbutils
+unzip
+zstd

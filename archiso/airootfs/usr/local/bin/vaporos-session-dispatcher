@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VaporOS Session Dispatcher
+# Seamlessly switches between Gaming Mode (gamescope + Steam Big Picture)
+# and Desktop Mode (Hyprland Wayland) without rebooting or a heavy DM.
+# ==============================================================================
+set -u
+
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vaporos"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}"
+NEXT_SESSION_FILE="$STATE_DIR/next-session"
+SWITCH_FLAG="$CACHE_DIR/vaporos-switch-requested"
+LOG_FILE="$CACHE_DIR/vaporos-session.log"
+
+mkdir -p "$STATE_DIR" "$CACHE_DIR"
+
+log() {
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+}
+
+# Respect kernel boot parameter (vaporos.mode=desktop | gaming) on initial login
+if [[ ! -f "$NEXT_SESSION_FILE" ]]; then
+    if grep -qw "vaporos.mode=desktop" /proc/cmdline 2>/dev/null; then
+        echo "desktop" > "$NEXT_SESSION_FILE"
+    else
+        echo "gaming" > "$NEXT_SESSION_FILE"
+    fi
+fi
+
+# Ensure user PipeWire audio daemon is ready
+systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service 2>/dev/null || true
+
+CONSECUTIVE_GAMING_FAILS=0
+
+while true; do
+    TARGET_MODE="$(tr -d '[:space:]' < "$NEXT_SESSION_FILE" 2>/dev/null || echo "gaming")"
+    rm -f "$SWITCH_FLAG"
+
+    case "$TARGET_MODE" in
+        desktop)
+            log "Starting Desktop Mode (Hyprland)"
+            CONSECUTIVE_GAMING_FAILS=0
+            /usr/local/bin/vaporos-desktop-session >> "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            log "Desktop Mode exited with code $EXIT_CODE"
+            ;;
+        gaming|*)
+            log "Starting Gaming Mode (gamescope + Steam Big Picture)"
+            START_TS=$(date +%s)
+            /usr/local/bin/vaporos-gaming-session >> "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+            END_TS=$(date +%s)
+            DURATION=$((END_TS - START_TS))
+            log "Gaming Mode exited with code $EXIT_CODE after ${DURATION}s"
+
+            # Safety fallback: if gamescope fails immediately (e.g. VM without Vulkan),
+            # automatically fall back to Desktop Mode instead of boot-looping.
+            if [[ ! -f "$SWITCH_FLAG" && $DURATION -lt 8 ]]; then
+                CONSECUTIVE_GAMING_FAILS=$((CONSECUTIVE_GAMING_FAILS + 1))
+                if [[ $CONSECUTIVE_GAMING_FAILS -ge 2 ]]; then
+                    log "Gaming Mode failed repeatedly; falling back to Desktop Mode"
+                    echo "desktop" > "$NEXT_SESSION_FILE"
+                    touch "$SWITCH_FLAG"
+                fi
+            else
+                CONSECUTIVE_GAMING_FAILS=0
+            fi
+            ;;
+    esac
+
+    # If a session switch was requested, loop immediately into the new mode.
+    # Otherwise, short pause and restart the configured mode.
+    if [[ -f "$SWITCH_FLAG" ]]; then
+        sleep 0.5
+    else
+        sleep 1
+    fi
+done

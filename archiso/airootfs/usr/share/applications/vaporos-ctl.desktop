@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=VaporOS Control Center
+Comment=Manage performance, RAM, apps, updates, and Gaming Mode settings
+Exec=foot -T "VaporOS Control Center" /usr/local/bin/vaporos-ctl
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=System;Settings;

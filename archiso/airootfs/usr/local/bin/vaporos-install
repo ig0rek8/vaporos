@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# vaporos-install — Ultra-Clean Btrfs (zstd) + systemd-boot Disk Installer
+# Installs VaporOS from Live ISO onto a target NVMe/SSD.
+# ==============================================================================
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Please run as root: sudo vaporos-install" >&2
+    exit 1
+fi
+
+if [[ ! -d /sys/firmware/efi/efivars ]]; then
+    echo "ERROR: VaporOS disk installer currently requires UEFI boot mode." >&2
+    exit 1
+fi
+
+echo "========================================================"
+echo "  VaporOS Installer (Arch Linux + Btrfs zstd + UEFI)"
+echo "========================================================"
+echo ""
+lsblk -d -o NAME,SIZE,MODEL,TYPE | grep -E "NAME|disk"
+echo ""
+read -r -p "Target disk (e.g. /dev/nvme0n1 or /dev/sda): " DISK
+
+if [[ ! -b "$DISK" ]]; then
+    echo "ERROR: '$DISK' is not a valid block device." >&2
+    exit 1
+fi
+
+echo ""
+echo "WARNING: ALL DATA ON $DISK WILL BE PERMANENTLY ERASED!"
+read -r -p "Type YES to confirm: " CONFIRM
+if [[ "$CONFIRM" != "YES" ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+read -r -p "Timezone (default: UTC, e.g. Europe/Moscow): " TZ
+TZ="${TZ:-UTC}"
+
+# Partitioning: 512M EFI + remainder Btrfs
+echo "[1/6] Partitioning $DISK..."
+parted -s "$DISK" mklabel gpt
+parted -s "$DISK" mkpart ESP fat32 1MiB 513MiB
+parted -s "$DISK" set 1 esp on
+parted -s "$DISK" mkpart VAPOROS btrfs 513MiB 100%
+
+if [[ "$DISK" == *nvme* || "$DISK" == *mmcblk* ]]; then
+    EFI_PART="${DISK}p1"
+    ROOT_PART="${DISK}p2"
+else
+    EFI_PART="${DISK}1"
+    ROOT_PART="${DISK}2"
+fi
+
+echo "[2/6] Formatting partitions (FAT32 EFI + Btrfs zstd)..."
+mkfs.fat -F32 -n VAPOR_EFI "$EFI_PART"
+mkfs.btrfs -f -L VAPOR_ROOT "$ROOT_PART"
+
+mount "$ROOT_PART" /mnt
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@home
+umount /mnt
+
+mount -o noatime,compress=zstd:3,subvol=@ "$ROOT_PART" /mnt
+mkdir -p /mnt/home /mnt/boot
+mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_PART" /mnt/home
+mount "$EFI_PART" /mnt/boot
+
+echo "[3/6] Installing VaporOS base & gaming stack..."
+pacstrap -K /mnt \
+    base linux-zen linux-firmware amd-ucode intel-ucode \
+    btrfs-progs zram-generator sudo polkit \
+    networkmanager iwd bluez bluez-utils openssh curl \
+    pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber lib32-pipewire lib32-libpulse \
+    mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon vulkan-intel lib32-vulkan-intel \
+    vulkan-icd-loader lib32-vulkan-icd-loader vulkan-mesa-layers lib32-vulkan-mesa-layers \
+    libva-mesa-driver lib32-libva-mesa-driver intel-media-driver \
+    gamescope steam mangohud lib32-mangohud gamemode lib32-gamemode \
+    ttf-liberation ttf-dejavu noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd \
+    greetd hyprland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
+    qt5-wayland qt6-wayland waybar fuzzel foot mako libnotify wl-clipboard \
+    grim slurp brightnessctl playerctl pavucontrol thunar gvfs swaybg polkit-gnome \
+    bash-completion git htop nano jq pciutils usbutils unzip zstd
+
+echo "[4/6] Generating fstab & copying VaporOS configurations..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# Copy VaporOS custom scripts, configs, and skel from live environment
+cp -a /usr/local/bin/vaporos-* /mnt/usr/local/bin/
+cp -a /usr/bin/steamos-session-select /mnt/usr/bin/
+cp -a /etc/greetd /mnt/etc/
+cp -a /etc/sysctl.d/99-vaporos-gaming.conf /mnt/etc/sysctl.d/
+cp -a /etc/systemd/zram-generator.conf /mnt/etc/systemd/
+cp -a /etc/systemd/system/vaporos-firstboot.service /mnt/etc/systemd/system/
+cp -a /etc/NetworkManager/conf.d/wifi_backend.conf /mnt/etc/NetworkManager/conf.d/
+cp -a /etc/systemd/journald.conf.d/00-vaporos.conf /mnt/etc/systemd/journald.conf.d/
+cp -a /etc/skel/. /mnt/etc/skel/
+cp -a /etc/pacman.conf /mnt/etc/pacman.conf
+cp -a /etc/os-release /mnt/etc/os-release
+cp -a /etc/sudoers.d/10-gamer /mnt/etc/sudoers.d/10-gamer
+cp -a /usr/share/applications/vaporos-*.desktop /mnt/usr/share/applications/
+
+echo "[5/6] Configuring system inside chroot..."
+ROOT_UUID="$(blkid -s UUID -o value "$ROOT_PART")"
+
+arch-chroot /mnt /bin/bash <<EOF
+set -euo pipefail
+ln -sf "/usr/share/zoneinfo/${TZ}" /etc/localtime
+hwclock --systohc
+sed -i 's/^#en_US.UTF-8/en_US.UTF-8/; s/^#ru_RU.UTF-8/ru_RU.UTF-8/' /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo "vaporos" > /etc/hostname
+
+useradd -m -G wheel,video,audio,input,render,storage,gamemode -s /usr/bin/bash gamer
+passwd -d gamer
+
+systemctl enable NetworkManager.service
+systemctl enable bluetooth.service
+systemctl enable greetd.service
+systemctl enable vaporos-firstboot.service
+
+bootctl install
+cat > /boot/loader/loader.conf <<LOADER
+default 01-vaporos-gaming.conf
+timeout 3
+console-mode max
+editor no
+LOADER
+
+cat > /boot/loader/entries/01-vaporos-gaming.conf <<ENTRY
+title   VaporOS (Gaming Mode)
+linux   /vmlinuz-linux-zen
+initrd  /intel-ucode.img
+initrd  /amd-ucode.img
+initrd  /initramfs-linux-zen.img
+options root=UUID=${ROOT_UUID} rootflags=subvol=@ rw quiet loglevel=3 vaporos.mode=gaming
+ENTRY
+
+cat > /boot/loader/entries/02-vaporos-desktop.conf <<ENTRY
+title   VaporOS (Desktop Mode — Hyprland)
+linux   /vmlinuz-linux-zen
+initrd  /intel-ucode.img
+initrd  /amd-ucode.img
+initrd  /initramfs-linux-zen.img
+options root=UUID=${ROOT_UUID} rootflags=subvol=@ rw quiet loglevel=3 vaporos.mode=desktop
+ENTRY
+EOF
+
+echo "[6/6] Installation complete! Reboot and remove the USB drive."

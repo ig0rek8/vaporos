@@ -1,0 +1,9 @@
+NAME="VaporOS"
+PRETTY_NAME="VaporOS (Ultra-Light Arch Gaming OS)"
+ID=vaporos
+ID_LIKE=arch
+BUILD_ID=rolling
+ANSI_COLOR="38;2;26;159;255"
+HOME_URL="https://github.com/vaporos"
+DOCUMENTATION_URL="https://wiki.archlinux.org/"
+LOGO=archlinux-logo

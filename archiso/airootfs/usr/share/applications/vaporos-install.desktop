@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Install VaporOS to Disk
+Comment=Install VaporOS onto your SSD/NVMe with Btrfs + zstd + systemd-boot
+Exec=foot -T "Install VaporOS" sudo /usr/local/bin/vaporos-install
+Icon=system-software-install
+Terminal=false
+Type=Application
+Categories=System;

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# SteamOS Compatibility Hook (/usr/bin/steamos-session-select)
+# Steam Big Picture calls this binary when the user clicks "Switch to Desktop"
+# in the Power Menu. We route it cleanly to VaporOS's session switcher.
+# ==============================================================================
+set -euo pipefail
+
+ARG="${1:-desktop}"
+
+case "$ARG" in
+    plasma|plasma-x11-persistent|plasma-wayland-persistent|desktop|hyprland)
+        exec /usr/local/bin/vaporos-switch-session desktop
+        ;;
+    gamescope|gaming|steam)
+        exec /usr/local/bin/vaporos-switch-session gaming
+        ;;
+    *)
+        exec /usr/local/bin/vaporos-switch-session desktop
+        ;;
+esac
