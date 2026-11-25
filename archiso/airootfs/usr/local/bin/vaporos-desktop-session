@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# VaporOS Desktop Mode Session (Hyprland Wayland)
-# Auto-enables VM-safe Wayland/software rendering flags in VirtualBox/VMware/QEMU.
+# VaporOS Desktop Mode Session
+# - Real AMD/Intel GPU: launches Hyprland (auto-falls back to Sway if it fails)
+# - Virtual Machines (VirtualBox/VMware/QEMU): launches Sway with pixman
+#   software rendering so you ALWAYS get a working Wayland desktop.
 # ==============================================================================
 set -u
 
 export XDG_SESSION_TYPE=wayland
-export XDG_CURRENT_DESKTOP=Hyprland
-export XDG_SESSION_DESKTOP=Hyprland
-
-# Wayland toolkit hints
 export QT_QPA_PLATFORM="wayland;xcb"
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 export GDK_BACKEND="wayland,x11,*"
@@ -18,19 +16,39 @@ export CLUTTER_BACKEND=wayland
 export MOZ_ENABLE_WAYLAND=1
 export ELECTRON_OZONE_PLATFORM_HINT=auto
 
-# Auto-detect VM (VirtualBox, VMware, QEMU, Hyper-V) and enable safe rendering
-if systemd-detect-virt -q 2>/dev/null; then
-    export WLR_NO_HARDWARE_CURSORS=1
-    export WLR_RENDERER_ALLOW_SOFTWARE=1
-    export AQ_NO_MODIFIERS=1
-    if [[ ! -e /dev/dri/renderD128 ]]; then
-        export LIBGL_ALWAYS_SOFTWARE=1
-    fi
-fi
-
 # Balanced CPU governor in Desktop Mode
 for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [[ -w "$gov" ]] && echo schedutil > "$gov" 2>/dev/null || true
 done
 
-exec Hyprland
+start_sway() {
+    export XDG_CURRENT_DESKTOP=sway
+    export XDG_SESSION_DESKTOP=sway
+    export WLR_NO_HARDWARE_CURSORS=1
+    if systemd-detect-virt -q 2>/dev/null; then
+        export WLR_RENDERER=pixman
+        export WLR_RENDERER_ALLOW_SOFTWARE=1
+        export LIBGL_ALWAYS_SOFTWARE=1
+    fi
+    exec sway --unsupported-gpu
+}
+
+# Inside VMs, Hyprland (Aquamarine) frequently fails without full GLES 3.2/DRM.
+# Use Sway (wlroots + pixman) for guaranteed instant desktop boot in VMs.
+if systemd-detect-virt -q 2>/dev/null; then
+    start_sway
+fi
+
+# On bare-metal AMD/Intel hardware, run Hyprland; if it fails fast, fall back to Sway.
+export XDG_CURRENT_DESKTOP=Hyprland
+export XDG_SESSION_DESKTOP=Hyprland
+START_TS=$(date +%s)
+Hyprland
+HYPR_RC=$?
+END_TS=$(date +%s)
+
+if [[ $HYPR_RC -ne 0 && $((END_TS - START_TS)) -lt 6 ]]; then
+    start_sway
+fi
+
+exit "$HYPR_RC"

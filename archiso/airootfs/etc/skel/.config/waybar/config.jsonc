@@ -7,7 +7,9 @@
     "modules-left": [
         "custom/gaming",
         "hyprland/workspaces",
-        "hyprland/window"
+        "sway/workspaces",
+        "hyprland/window",
+        "sway/window"
     ],
     "modules-center": [
         "clock"

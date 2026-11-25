@@ -72,8 +72,10 @@ ttf-jetbrains-mono-nerd
 greetd
 greetd-tuigreet
 
-# --- Desktop Mode (Hyprland Wayland — Minimal & Fast) ---
+# --- Desktop Mode (Hyprland + Sway VM/Fallback — Minimal & Fast) ---
 hyprland
+sway
+xorg-xwayland
 xdg-desktop-portal-hyprland
 xdg-desktop-portal-gtk
 qt5-wayland

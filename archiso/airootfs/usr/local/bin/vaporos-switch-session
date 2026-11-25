@@ -15,9 +15,12 @@ case "$TARGET" in
     gaming|gamescope|steam)
         echo "gaming" > "$STATE_DIR/next-session"
         touch "$CACHE_DIR/vaporos-switch-requested"
-        # Cleanly exit Hyprland if running
+        # Cleanly exit Hyprland or Sway if running
         if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || pgrep -x Hyprland >/dev/null 2>&1; then
             hyprctl dispatch exit >/dev/null 2>&1 || pkill -TERM -x Hyprland || true
+        fi
+        if [[ -n "${SWAYSOCK:-}" ]] || pgrep -x sway >/dev/null 2>&1; then
+            swaymsg exit >/dev/null 2>&1 || pkill -TERM -x sway || true
         fi
         ;;
     desktop|hyprland|plasma)
