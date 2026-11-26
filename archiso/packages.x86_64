@@ -81,6 +81,8 @@ xdg-desktop-portal-gtk
 qt5-wayland
 qt6-wayland
 waybar
+nwg-drawer
+papirus-icon-theme
 fuzzel
 foot
 mako

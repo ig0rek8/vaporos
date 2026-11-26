@@ -5,33 +5,47 @@
     "spacing": 6,
 
     "modules-left": [
+        "custom/apps",
         "custom/gaming",
         "hyprland/workspaces",
         "sway/workspaces",
         "hyprland/window",
-        "sway/window"
+        "sway/window",
+        "custom/close-window"
     ],
     "modules-center": [
         "clock"
     ],
     "modules-right": [
-        "custom/vaporctl",
         "cpu",
         "memory",
         "pulseaudio",
         "network",
-        "battery"
+        "custom/battery",
+        "custom/power"
     ],
+
+    "custom/apps": {
+        "format": "⊞ Apps",
+        "tooltip-format": "Open Applications Grid (GNOME-style)",
+        "on-click": "pkill -x nwg-drawer || nwg-drawer -mb 16 -mr 16 -ml 16 -mt 16 -c 6 -is 64 -ovl -pbpoweroff 'systemctl poweroff' -pbreboot 'systemctl reboot' -pblock 'vaporos-switch-session gaming'"
+    },
 
     "custom/gaming": {
         "format": "🎮 Gaming Mode",
-        "tooltip-format": "Switch back to Steam Big Picture (Gamescope)",
+        "tooltip-format": "Switch to Steam Big Picture (Gamescope)",
         "on-click": "/usr/local/bin/vaporos-switch-session gaming"
     },
 
-    "custom/vaporctl": {
-        "format": "⚙ VaporOS",
-        "tooltip-format": "Open VaporOS Control Center",
+    "custom/close-window": {
+        "format": "✕",
+        "tooltip-format": "Закрыть активное окно",
+        "on-click": "/usr/local/bin/vaporos-close-window"
+    },
+
+    "custom/power": {
+        "format": "⏻",
+        "tooltip-format": "VaporOS Control Center & Power",
         "on-click": "foot -T 'VaporOS Control Center' /usr/local/bin/vaporos-ctl"
     },
 
@@ -40,12 +54,21 @@
         "on-click": "activate"
     },
 
+    "sway/workspaces": {
+        "format": "{name}",
+        "on-click": "activate"
+    },
+
     "hyprland/window": {
-        "max-length": 45
+        "max-length": 40
+    },
+
+    "sway/window": {
+        "max-length": 40
     },
 
     "clock": {
-        "format": "{:%H:%M  %d.%m}",
+        "format": "{:%a %d %b  %H:%M}",
         "tooltip-format": "{:%A, %d %B %Y}"
     },
 
@@ -60,8 +83,8 @@
     },
 
     "pulseaudio": {
-        "format": "VOL {volume}%",
-        "format-muted": "MUTED",
+        "format": "🔊 {volume}%",
+        "format-muted": "🔇",
         "on-click": "pavucontrol"
     },
 
@@ -72,8 +95,10 @@
         "on-click": "foot -T 'Network' nmtui"
     },
 
-    "battery": {
-        "format": "BAT {capacity}%",
-        "format-charging": "CHG {capacity}%"
+    "custom/battery": {
+        "exec": "/usr/local/bin/vaporos-power-status",
+        "return-type": "json",
+        "interval": 5,
+        "hide-empty-text": true
     }
 }

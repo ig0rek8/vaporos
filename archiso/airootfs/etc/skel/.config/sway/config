@@ -25,15 +25,18 @@ client.unfocused        #232d3b #0e141b #8f98a0 #232d3b #232d3b
 
 # Autostart
 exec waybar
+exec /usr/local/bin/vaporos-dock-ctl start
 exec mako
 exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 
 # Keybindings
 bindsym $mod+Return exec $term
+bindsym $mod+a exec pkill -x nwg-drawer || nwg-drawer -mb 16 -mr 16 -ml 16 -mt 16 -c 6 -is 64 -ovl -pbpoweroff 'systemctl poweroff' -pbreboot 'systemctl reboot' -pblock 'vaporos-switch-session gaming'
 bindsym $mod+d exec $menu
 bindsym $mod+space exec $menu
 bindsym $mod+e exec thunar
 bindsym $mod+g exec /usr/local/bin/vaporos-switch-session gaming
+bindsym $mod+Shift+p exec /usr/local/bin/vaporos-dock-ctl menu
 bindsym $mod+c exec foot -T "VaporOS Control Center" /usr/local/bin/vaporos-ctl
 
 bindsym $mod+q kill

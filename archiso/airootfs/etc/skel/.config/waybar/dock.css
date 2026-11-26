@@ -1,0 +1,54 @@
+* {
+    font-family: "JetBrainsMono Nerd Font", "DejaVu Sans", sans-serif;
+    font-size: 20px;
+    border: none;
+}
+
+window#waybar {
+    background: transparent;
+}
+
+.modules-center {
+    background-color: rgba(18, 26, 36, 0.90);
+    border: 1px solid rgba(102, 192, 244, 0.30);
+    border-radius: 18px;
+    padding: 4px 10px;
+}
+
+#custom-dock-apps,
+#custom-dock-gaming,
+#custom-dock-files,
+#custom-dock-term,
+#custom-dock-ctl,
+#custom-dock-audio,
+#custom-dock-net {
+    background-color: rgba(28, 39, 52, 0.85);
+    color: #dbe6f0;
+    border-radius: 12px;
+    padding: 4px 14px;
+    margin: 2px 2px;
+}
+
+#custom-dock-apps {
+    background-color: rgba(40, 56, 74, 0.95);
+    color: #ffffff;
+}
+
+#custom-dock-gaming {
+    background-color: #1a9fff;
+    color: #0b1117;
+}
+
+#custom-dock-apps:hover,
+#custom-dock-files:hover,
+#custom-dock-term:hover,
+#custom-dock-ctl:hover,
+#custom-dock-audio:hover,
+#custom-dock-net:hover {
+    background-color: #2b3e52;
+    color: #ffffff;
+}
+
+#custom-dock-gaming:hover {
+    background-color: #4bb4ff;
+}

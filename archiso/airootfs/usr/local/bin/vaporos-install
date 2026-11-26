@@ -80,7 +80,7 @@ pacstrap -K /mnt \
     gamescope steam mangohud lib32-mangohud gamemode lib32-gamemode \
     ttf-liberation ttf-dejavu ttf-jetbrains-mono-nerd \
     greetd greetd-tuigreet hyprland sway xorg-xwayland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
-    qt5-wayland qt6-wayland waybar fuzzel foot mako libnotify wl-clipboard \
+    qt5-wayland qt6-wayland waybar nwg-drawer papirus-icon-theme fuzzel foot mako libnotify wl-clipboard \
     grim slurp brightnessctl playerctl pavucontrol thunar gvfs swaybg polkit-gnome \
     bash-completion git htop nano jq pciutils usbutils unzip zstd
 

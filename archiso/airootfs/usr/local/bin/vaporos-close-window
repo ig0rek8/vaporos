@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Close the currently active window in Hyprland or Sway with 1 click
+set -u
+if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+    hyprctl dispatch killactive >/dev/null 2>&1 || true
+elif [[ -n "${SWAYSOCK:-}" ]]; then
+    swaymsg kill >/dev/null 2>&1 || true
+fi

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# vaporos-power-status — Laptop/Handheld vs Desktop PC detector & Battery status
+# Outputs Waybar JSON by default; hides module completely on Desktop PCs.
+#
+# Usage:
+#   vaporos-power-status            Waybar JSON output
+#   vaporos-power-status --summary  Human-readable line for vaporos-ctl
+#   vaporos-power-status --is-laptop  Exit 0 if laptop/handheld, 1 if desktop PC
+# ==============================================================================
+set -u
+
+find_system_battery() {
+    for ps in /sys/class/power_supply/*; do
+        [[ -d "$ps" ]] || continue
+        [[ -r "$ps/type" ]] || continue
+        [[ "$(cat "$ps/type" 2>/dev/null)" == "Battery" ]] || continue
+        # Ignore wireless mice/keyboards/controllers (scope == Device)
+        if [[ -r "$ps/scope" && "$(cat "$ps/scope" 2>/dev/null)" == "Device" ]]; then
+            continue
+        fi
+        echo "$ps"
+        return 0
+    done
+    return 1
+}
+
+is_laptop_chassis() {
+    local ct
+    ct="$(cat /sys/class/dmi/id/chassis_type 2>/dev/null || echo "")"
+    case "$ct" in
+        8|9|10|11|14|30|31|32) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+BAT_PATH="$(find_system_battery || true)"
+
+case "${1:-}" in
+    --is-laptop)
+        if [[ -n "$BAT_PATH" ]] || is_laptop_chassis; then
+            exit 0
+        else
+            exit 1
+        fi
+        ;;
+    --summary)
+        if [[ -n "$BAT_PATH" ]]; then
+            cap="$(cat "$BAT_PATH/capacity" 2>/dev/null || echo "?")"
+            status="$(cat "$BAT_PATH/status" 2>/dev/null || echo "Unknown")"
+            echo "Laptop / Handheld (Battery: ${cap}%, ${status})"
+        elif is_laptop_chassis; then
+            echo "Laptop / Handheld (AC Power, no battery)"
+        else
+            echo "Desktop PC (AC Power)"
+        fi
+        exit 0
+        ;;
+esac
+
+# Desktop PC (no system battery) -> emit empty text so Waybar hides the pill
+if [[ -z "$BAT_PATH" ]]; then
+    printf '{"text": "", "tooltip": "Desktop PC", "class": "desktop"}\n'
+    exit 0
+fi
+
+CAP="$(cat "$BAT_PATH/capacity" 2>/dev/null || echo 0)"
+STATUS="$(cat "$BAT_PATH/status" 2>/dev/null || echo "Unknown")"
+
+# Optional live power draw in Watts
+WATTS_STR=""
+if [[ -r "$BAT_PATH/power_now" ]]; then
+    p_uw="$(cat "$BAT_PATH/power_now" 2>/dev/null || echo 0)"
+    if [[ "$p_uw" =~ ^[0-9]+$ && "$p_uw" -gt 0 ]]; then
+        WATTS_STR="$(awk -v uw="$p_uw" 'BEGIN { printf "%.1f W", uw / 1000000 }')"
+    fi
+elif [[ -r "$BAT_PATH/current_now" && -r "$BAT_PATH/voltage_now" ]]; then
+    c_ua="$(cat "$BAT_PATH/current_now" 2>/dev/null || echo 0)"
+    v_uv="$(cat "$BAT_PATH/voltage_now" 2>/dev/null || echo 0)"
+    if [[ "$c_ua" =~ ^[0-9]+$ && "$v_uv" =~ ^[0-9]+$ && "$c_ua" -gt 0 && "$v_uv" -gt 0 ]]; then
+        WATTS_STR="$(awk -v c="$c_ua" -v v="$v_uv" 'BEGIN { printf "%.1f W", (c * v) / 1000000000000 }')"
+    fi
+fi
+
+ICON="🔋"
+CSS_CLASS="normal"
+
+if [[ "$STATUS" == "Charging" ]]; then
+    ICON="⚡"
+    CSS_CLASS="charging"
+elif [[ "$STATUS" == "Full" || "$STATUS" == "Not charging" ]]; then
+    ICON="🔌"
+    CSS_CLASS="full"
+elif [[ "$CAP" -le 15 ]]; then
+    ICON="🪫"
+    CSS_CLASS="critical"
+elif [[ "$CAP" -le 30 ]]; then
+    ICON="🔋"
+    CSS_CLASS="warning"
+fi
+
+TOOLTIP="Устройство: Ноутбук / Портативка\nБатарея: ${CAP}% (${STATUS})"
+[[ -n "$WATTS_STR" ]] && TOOLTIP+="\nПотребление: ${WATTS_STR}"
+
+jq -cn \
+    --arg text "${ICON} ${CAP}%" \
+    --arg tooltip "$TOOLTIP" \
+    --arg cls "$CSS_CLASS" \
+    '{text: $text, tooltip: $tooltip, class: $cls}'

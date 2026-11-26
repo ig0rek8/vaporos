@@ -1,0 +1,60 @@
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 54,
+    "margin-bottom": 10,
+    "spacing": 8,
+    "exclusive": false,
+
+    "modules-center": [
+        "custom/dock-apps",
+        "custom/dock-gaming",
+        "custom/dock-files",
+        "custom/dock-term",
+        "custom/dock-ctl",
+        "custom/dock-audio",
+        "custom/dock-net"
+    ],
+
+    "custom/dock-apps": {
+        "format": "⊞",
+        "tooltip-format": "Applications Grid (All Apps)",
+        "on-click": "pkill -x nwg-drawer || nwg-drawer -mb 16 -mr 16 -ml 16 -mt 16 -c 6 -is 64 -ovl -pbpoweroff 'systemctl poweroff' -pbreboot 'systemctl reboot' -pblock 'vaporos-switch-session gaming'"
+    },
+
+    "custom/dock-gaming": {
+        "format": "🎮",
+        "tooltip-format": "Switch to Gaming Mode (Steam Big Picture)",
+        "on-click": "/usr/local/bin/vaporos-switch-session gaming"
+    },
+
+    "custom/dock-files": {
+        "format": "📁",
+        "tooltip-format": "Files (Thunar)",
+        "on-click": "thunar"
+    },
+
+    "custom/dock-term": {
+        "format": "💻",
+        "tooltip-format": "Terminal (Foot)",
+        "on-click": "foot"
+    },
+
+    "custom/dock-ctl": {
+        "format": "⚙",
+        "tooltip-format": "VaporOS Control Center & App Installer",
+        "on-click": "foot -T 'VaporOS Control Center' /usr/local/bin/vaporos-ctl"
+    },
+
+    "custom/dock-audio": {
+        "format": "🔊",
+        "tooltip-format": "Audio Settings (PipeWire)",
+        "on-click": "pavucontrol"
+    },
+
+    "custom/dock-net": {
+        "format": "🌐",
+        "tooltip-format": "Network & Wi-Fi (nmtui)",
+        "on-click": "foot -T 'Network' nmtui"
+    }
+}

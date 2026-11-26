@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Pin / Unpin Dock Apps
+Comment=Choose which applications are pinned to the VaporOS bottom dock
+Exec=/usr/local/bin/vaporos-dock-ctl menu
+Icon=pin
+Terminal=false
+Type=Application
+Categories=System;Settings;

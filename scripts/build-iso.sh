@@ -35,6 +35,8 @@ ln -sf /etc/systemd/system/vaporos-firstboot.service "$WANTS_DIR/vaporos-firstbo
 ln -sf /usr/lib/systemd/system/multi-user.target "$SYSTEMD_DIR/default.target"
 # Prevent getty@tty1 from fighting greetd on VT1
 ln -sf /dev/null "$SYSTEMD_DIR/getty@tty1.service"
+# Pre-set timezone so systemd-firstboot does not block boot with Initial Setup prompt
+ln -sf /usr/share/zoneinfo/UTC "$PROFILE_DIR/airootfs/etc/localtime"
 
 # Ensure executable bits on custom scripts
 chmod 755 \
@@ -43,6 +45,9 @@ chmod 755 \
     "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-desktop-session" \
     "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-switch-session" \
     "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-ctl" \
+    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-dock-ctl" \
+    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-power-status" \
+    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-close-window" \
     "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-install" \
     "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-firstboot" \
     "$PROFILE_DIR/airootfs/usr/bin/steamos-session-select"

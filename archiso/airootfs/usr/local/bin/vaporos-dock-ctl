@@ -1,0 +1,343 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# vaporos-dock-ctl — Dynamic GNOME-style Bottom Dock Pin/Unpin Manager
+# Works identically on Hyprland (bare-metal) and Sway (VMs) via Waybar.
+#
+# Usage:
+#   vaporos-dock-ctl start               Start the floating bottom dock
+#   vaporos-dock-ctl rebuild             Regenerate dock.jsonc & reload dock
+#   vaporos-dock-ctl pin <id.desktop>    Pin an application to the dock
+#   vaporos-dock-ctl unpin <id.desktop>  Unpin an application from the dock
+#   vaporos-dock-ctl toggle <id.desktop> Toggle pin state for an app
+#   vaporos-dock-ctl menu                Interactive Fuzzel Pin/Unpin picker
+#   vaporos-dock-ctl sync                Sync pinned apps from nwg-drawer
+# ==============================================================================
+set -euo pipefail
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vaporos"
+WAYBAR_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/waybar"
+PIN_FILE="$CONF_DIR/pinned-apps"
+NWG_PIN_FILE="${XDG_CACHE_HOME:-$HOME/.cache}/nwg-drawer-pinned"
+DOCK_JSON="$WAYBAR_DIR/dock.jsonc"
+DOCK_CSS="$WAYBAR_DIR/dock.css"
+
+mkdir -p "$CONF_DIR" "$WAYBAR_DIR" "${XDG_CACHE_HOME:-$HOME/.cache}"
+
+# Seed default pinned apps on first run
+if [[ ! -f "$PIN_FILE" ]]; then
+    cat > "$PIN_FILE" <<'EOF'
+vaporos-return-gaming.desktop
+thunar.desktop
+foot.desktop
+vaporos-ctl.desktop
+org.pulseaudio.pavucontrol.desktop
+EOF
+fi
+
+find_desktop_file() {
+    local id="$1"
+    for dir in \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
+        "/usr/local/share/applications" \
+        "/usr/share/applications"; do
+        if [[ -f "$dir/$id" ]]; then
+            echo "$dir/$id"
+            return 0
+        fi
+    done
+    return 1
+}
+
+get_desktop_field() {
+    local file="$1"
+    local key="$2"
+    awk -F= -v k="$key" '
+        /^\[Desktop Entry\]/ { in_entry=1; next }
+        /^\[/ { in_entry=0 }
+        in_entry && $1 == k {
+            sub(/^[^=]*=/, "")
+            print
+            exit
+        }
+    ' "$file"
+}
+
+clean_exec() {
+    # Strip freedesktop %u %U %f %F %i %c %k field codes
+    echo "$1" | sed -E 's/ %[uUfFdDnNickvm]//g'
+}
+
+icon_for_app() {
+    local id="$1"
+    local name="$2"
+    case "$id" in
+        vaporos-return-gaming.desktop) echo "🎮" ;;
+        steam.desktop)                 echo "🕹" ;;
+        thunar.desktop)                echo "📁" ;;
+        foot.desktop)                  echo "💻" ;;
+        vaporos-ctl.desktop)           echo "⚙" ;;
+        vaporos-install.desktop)       echo "💾" ;;
+        *pavucontrol*)                 echo "🔊" ;;
+        *firefox*|*chromium*|*brave*)  echo "🌐" ;;
+        *lutris*|*heroic*)             echo "🎯" ;;
+        *discord*|*vesktop*|*telegram*) echo "💬" ;;
+        *code*|*vscodium*|*nvim*)      echo "📝" ;;
+        *)
+            # Clean 2-letter monogram badge for any other installed app
+            echo "${name:0:2}"
+            ;;
+    esac
+}
+
+sync_to_nwg_drawer() {
+    # Mirror pinned desktop IDs into nwg-drawer's pinned cache
+    grep -v '^[[:space:]]*$' "$PIN_FILE" > "$NWG_PIN_FILE" 2>/dev/null || true
+}
+
+rebuild_dock() {
+    local modules=('"custom/dock-apps"')
+    local defs=""
+    local css_ids=("#custom-dock-apps" "#custom-dock-pin")
+    local idx=0
+
+    while IFS= read -r app_id || [[ -n "$app_id" ]]; do
+        app_id="$(echo "$app_id" | tr -d '[:space:]')"
+        [[ -z "$app_id" || "$app_id" == \#* ]] && continue
+
+        local dfile
+        if ! dfile="$(find_desktop_file "$app_id")"; then
+            continue
+        fi
+
+        local name exec_cmd icon mod_key safe_name safe_exec
+        name="$(get_desktop_field "$dfile" "Name")"
+        exec_cmd="$(clean_exec "$(get_desktop_field "$dfile" "Exec")")"
+        [[ -z "$name" || -z "$exec_cmd" ]] && continue
+
+        icon="$(icon_for_app "$app_id" "$name")"
+        idx=$((idx + 1))
+        mod_key="custom/pinned-${idx}"
+        modules+=("\"${mod_key}\"")
+        css_ids+=("#custom-pinned-${idx}")
+
+        safe_name="$(jq -Rn --arg v "$name\nЛКМ: Открыть | ПКМ: Открепить" '$v')"
+        safe_exec="$(jq -Rn --arg v "$exec_cmd" '$v')"
+        local safe_icon
+        safe_icon="$(jq -Rn --arg v "$icon" '$v')"
+        local unpin_cmd
+        unpin_cmd="$(jq -Rn --arg v "/usr/local/bin/vaporos-dock-ctl unpin $app_id" '$v')"
+
+        defs+=",
+    \"${mod_key}\": {
+        \"format\": ${safe_icon},
+        \"tooltip-format\": ${safe_name},
+        \"on-click\": ${safe_exec},
+        \"on-click-right\": ${unpin_cmd}
+    }"
+    done < "$PIN_FILE"
+
+    modules+=('"custom/dock-pin"')
+
+    local mod_list
+    mod_list="$(IFS=,; echo "${modules[*]}")"
+
+    cat > "$DOCK_JSON" <<EOF
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 54,
+    "margin-bottom": 10,
+    "spacing": 8,
+    "exclusive": false,
+
+    "modules-center": [${mod_list}],
+
+    "custom/dock-apps": {
+        "format": "⊞",
+        "tooltip-format": "Все приложения (Сетка как в GNOME)\nПКМ по приложению в сетке: закрепить",
+        "on-click": "pkill -x nwg-drawer || nwg-drawer -mb 16 -mr 16 -ml 16 -mt 16 -c 6 -is 64 -ovl -pbpoweroff 'systemctl poweroff' -pbreboot 'systemctl reboot' -pblock 'vaporos-switch-session gaming'"
+    }${defs},
+
+    "custom/dock-pin": {
+        "format": "＋",
+        "tooltip-format": "Закрепить / открепить приложения в доке",
+        "on-click": "/usr/local/bin/vaporos-dock-ctl menu"
+    }
+}
+EOF
+
+    local css_selector
+    css_selector="$(IFS=,; echo "${css_ids[*]}")"
+
+    cat > "$DOCK_CSS" <<EOF
+* {
+    font-family: "JetBrainsMono Nerd Font", "DejaVu Sans", sans-serif;
+    font-size: 19px;
+    border: none;
+}
+
+window#waybar {
+    background: transparent;
+}
+
+.modules-center {
+    background-color: rgba(18, 26, 36, 0.92);
+    border: 1px solid rgba(102, 192, 244, 0.30);
+    border-radius: 18px;
+    padding: 4px 10px;
+}
+
+${css_selector} {
+    background-color: rgba(28, 39, 52, 0.88);
+    color: #dbe6f0;
+    border-radius: 12px;
+    padding: 4px 14px;
+    margin: 2px 2px;
+}
+
+#custom-dock-apps {
+    background-color: rgba(40, 56, 74, 0.95);
+    color: #ffffff;
+}
+
+#custom-pinned-1 {
+    background-color: #1a9fff;
+    color: #0b1117;
+}
+
+#custom-dock-pin {
+    background-color: rgba(26, 159, 255, 0.18);
+    color: #66c0f4;
+}
+
+${css_selector}:hover {
+    background-color: #2b3e52;
+    color: #ffffff;
+}
+
+#custom-pinned-1:hover {
+    background-color: #4bb4ff;
+    color: #0b1117;
+}
+EOF
+
+    sync_to_nwg_drawer
+}
+
+restart_dock() {
+    pkill -f "waybar -c .*dock\.jsonc" 2>/dev/null || true
+    sleep 0.15
+    nohup waybar -c "$DOCK_JSON" -s "$DOCK_CSS" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+is_pinned() {
+    grep -Fxq "$1" "$PIN_FILE" 2>/dev/null
+}
+
+pin_app() {
+    local app_id="$1"
+    if ! is_pinned "$app_id"; then
+        echo "$app_id" >> "$PIN_FILE"
+        rebuild_dock
+        restart_dock
+        notify-send -a "VaporOS Dock" "Закреплено в доке" "$app_id" 2>/dev/null || true
+    fi
+}
+
+unpin_app() {
+    local app_id="$1"
+    if is_pinned "$app_id"; then
+        grep -Fxv "$app_id" "$PIN_FILE" > "${PIN_FILE}.tmp" || true
+        mv "${PIN_FILE}.tmp" "$PIN_FILE"
+        rebuild_dock
+        restart_dock
+        notify-send -a "VaporOS Dock" "Откреплено от дока" "$app_id" 2>/dev/null || true
+    fi
+}
+
+toggle_app() {
+    local app_id="$1"
+    if is_pinned "$app_id"; then
+        unpin_app "$app_id"
+    else
+        pin_app "$app_id"
+    fi
+}
+
+interactive_menu() {
+    local lines=""
+    local seen=""
+
+    for dir in \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
+        "/usr/local/share/applications" \
+        "/usr/share/applications"; do
+        [[ -d "$dir" ]] || continue
+        for f in "$dir"/*.desktop; do
+            [[ -f "$f" ]] || continue
+            local id
+            id="$(basename "$f")"
+            [[ "$seen" == *"|$id|"* ]] && continue
+            seen+="|$id|"
+
+            local nodisplay name
+            nodisplay="$(get_desktop_field "$f" "NoDisplay")"
+            [[ "$nodisplay" == "true" ]] && continue
+            name="$(get_desktop_field "$f" "Name")"
+            [[ -z "$name" ]] && continue
+
+            if is_pinned "$id"; then
+                lines+="★ [Закреплено]  ${name}  ::  ${id}"$'\n'
+            else
+                lines+="○ [Закрепить]   ${name}  ::  ${id}"$'\n'
+            fi
+        done
+    done
+
+    local choice
+    choice="$(printf '%s' "$lines" | sort | fuzzel --dmenu --prompt='Закрепить / открепить > ' --width=54 --lines=14 || true)"
+    [[ -z "$choice" ]] && exit 0
+
+    local selected_id
+    selected_id="$(echo "$choice" | awk -F'  ::  ' '{print $2}' | tr -d '[:space:]')"
+    [[ -n "$selected_id" ]] && toggle_app "$selected_id"
+}
+
+sync_from_nwg() {
+    if [[ -f "$NWG_PIN_FILE" ]]; then
+        cp "$NWG_PIN_FILE" "$PIN_FILE"
+        rebuild_dock
+        restart_dock
+    fi
+}
+
+case "${1:-start}" in
+    start)
+        rebuild_dock
+        restart_dock
+        ;;
+    rebuild)
+        rebuild_dock
+        restart_dock
+        ;;
+    pin)
+        [[ -n "${2:-}" ]] && pin_app "$2"
+        ;;
+    unpin)
+        [[ -n "${2:-}" ]] && unpin_app "$2"
+        ;;
+    toggle)
+        [[ -n "${2:-}" ]] && toggle_app "$2"
+        ;;
+    menu)
+        interactive_menu
+        ;;
+    sync)
+        sync_from_nwg
+        ;;
+    *)
+        echo "Usage: vaporos-dock-ctl [start|rebuild|pin|unpin|toggle|menu|sync]" >&2
+        exit 1
+        ;;
+esac
