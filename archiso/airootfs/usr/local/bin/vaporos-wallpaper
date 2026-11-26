@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# VaporOS Wallpaper / Desktop Background Picker (persists across reboots)
+# Usage:
+#   vaporos-wallpaper --restore      (called on Sway/Hyprland startup)
+#   vaporos-wallpaper                (opens dark Steam-styled picker UI)
+# ==============================================================================
+set -u
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vaporos"
+WALL_FILE="$CONF_DIR/wallpaper"
+mkdir -p "$CONF_DIR"
+
+apply_bg() {
+    local spec="$1"
+    pkill -x swaybg 2>/dev/null || true
+    if [[ "$spec" == color:* ]]; then
+        local hex="${spec#color:}"
+        nohup swaybg -c "$hex" >/dev/null 2>&1 &
+    elif [[ -f "$spec" ]]; then
+        nohup swaybg -i "$spec" -m fill >/dev/null 2>&1 &
+    else
+        nohup swaybg -c "#0e1318" >/dev/null 2>&1 &
+    fi
+}
+
+if [[ "${1:-}" == "--restore" ]]; then
+    if [[ -f "$WALL_FILE" ]]; then
+        apply_bg "$(cat "$WALL_FILE")"
+    else
+        apply_bg "color:#0e1318"
+    fi
+    exit 0
+fi
+
+python3 - <<'PYEOF'
+import os
+import subprocess
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk
+
+CONF_DIR = os.path.expanduser("~/.config/vaporos")
+WALL_FILE = os.path.join(CONF_DIR, "wallpaper")
+os.makedirs(CONF_DIR, exist_ok=True)
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window, dialog {
+    background-color: #13171d;
+    color: #cfd8e3;
+    font-family: "JetBrainsMono Nerd Font", "DejaVu Sans", sans-serif;
+    font-size: 12.5px;
+}
+.hdr-title { font-size: 14.5px; font-weight: 700; color: #d0dae5; }
+.sub-lbl { font-size: 11px; color: #77879a; }
+button {
+    background-color: #1a2029;
+    color: #c2cdd9;
+    border: 1px solid #283344;
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-weight: 600;
+}
+button:hover {
+    background-color: #242e3d;
+    border-color: #4b9be5;
+    color: #dce4ee;
+}
+button.primary {
+    background-color: #25588a;
+    border-color: #3570a8;
+    color: #d8e4f0;
+}
+button.primary:hover { background-color: #2f6ca8; }
+"""
+
+PRESETS = [
+    ("Графит (по умолчанию)", "#0e1318"),
+    ("Тёмный Steam Slate", "#171a21"),
+    ("Глубокий синий", "#101b27"),
+    ("Тёмный хвойный", "#101c18"),
+    ("Матовый уголь", "#0a0c0f"),
+]
+
+def apply_spec(spec):
+    with open(WALL_FILE, "w") as f:
+        f.write(spec + "\n")
+    subprocess.run(["pkill", "-x", "swaybg"], stderr=subprocess.DEVNULL)
+    if spec.startswith("color:"):
+        subprocess.Popen(["swaybg", "-c", spec[6:]], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(["swaybg", "-i", spec, "-m", "fill"], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+class WallWin(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="VaporOS — Фон и обои рабочего стола")
+        self.set_default_size(400, 340)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        p = Gtk.CssProvider()
+        p.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.connect("key-press-event", lambda _w, e: self.close() if e.keyval == Gdk.KEY_Escape else False)
+        self.connect("destroy", Gtk.main_quit)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_border_width(14)
+        self.add(root)
+
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        t = Gtk.Label(label="󰸉  Обои рабочего стола", xalign=0)
+        t.get_style_context().add_class("hdr-title")
+        c = Gtk.Button(label="✕")
+        c.connect("clicked", lambda *_: self.close())
+        hdr.pack_start(t, True, True, 0)
+        hdr.pack_end(c, False, False, 0)
+        root.pack_start(hdr, False, False, 0)
+
+        pick_btn = Gtk.Button(label="󰉋  Выбрать картинку (PNG / JPG / WEBP)...")
+        pick_btn.get_style_context().add_class("primary")
+        pick_btn.connect("clicked", self.pick_file)
+        root.pack_start(pick_btn, False, False, 0)
+
+        sub = Gtk.Label(label="ИЛИ ВЫБРАТЬ МАТОВЫЙ ФОН:", xalign=0)
+        sub.get_style_context().add_class("sub-lbl")
+        root.pack_start(sub, False, False, 2)
+
+        for name, hexcol in PRESETS:
+            b = Gtk.Button(label=f"■  {name}  ({hexcol})")
+            b.connect("clicked", lambda _b, h=hexcol: apply_spec(f"color:{h}"))
+            root.pack_start(b, False, False, 0)
+
+        self.show_all()
+
+    def pick_file(self, *_):
+        dlg = Gtk.FileChooserDialog(
+            title="Выберите обои", parent=self, action=Gtk.FileChooserAction.OPEN
+        )
+        dlg.add_buttons("Отмена", Gtk.ResponseType.CANCEL, "Применить", Gtk.ResponseType.OK)
+        flt = Gtk.FileFilter()
+        flt.set_name("Изображения")
+        for pat in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
+            flt.add_pattern(pat)
+        dlg.add_filter(flt)
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            if path:
+                apply_spec(path)
+        dlg.destroy()
+
+WallWin()
+Gtk.main()
+PYEOF

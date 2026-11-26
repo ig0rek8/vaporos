@@ -31,25 +31,18 @@ mkdir -p "$WANTS_DIR"
 ln -sf /usr/lib/systemd/system/NetworkManager.service "$WANTS_DIR/NetworkManager.service"
 ln -sf /usr/lib/systemd/system/bluetooth.service "$WANTS_DIR/bluetooth.service"
 ln -sf /usr/lib/systemd/system/greetd.service "$WANTS_DIR/greetd.service"
+ln -sf /usr/lib/systemd/system/systemd-oomd.service "$WANTS_DIR/systemd-oomd.service"
 ln -sf /etc/systemd/system/vaporos-firstboot.service "$WANTS_DIR/vaporos-firstboot.service"
 ln -sf /usr/lib/systemd/system/multi-user.target "$SYSTEMD_DIR/default.target"
-# Prevent getty@tty1 from fighting greetd on VT1
+# Prevent getty@tty1 from fighting greetd on VT1 & mask unused accounts-daemon
 ln -sf /dev/null "$SYSTEMD_DIR/getty@tty1.service"
+ln -sf /dev/null "$SYSTEMD_DIR/accounts-daemon.service"
 # Pre-set timezone so systemd-firstboot does not block boot with Initial Setup prompt
 ln -sf /usr/share/zoneinfo/UTC "$PROFILE_DIR/airootfs/etc/localtime"
 
-# Ensure executable bits on custom scripts
+# Ensure executable bits on all custom VaporOS scripts
 chmod 755 \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-session-dispatcher" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-gaming-session" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-desktop-session" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-switch-session" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-ctl" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-dock-ctl" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-power-status" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-close-window" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-install" \
-    "$PROFILE_DIR/airootfs/usr/local/bin/vaporos-firstboot" \
+    "$PROFILE_DIR"/airootfs/usr/local/bin/vaporos-* \
     "$PROFILE_DIR/airootfs/usr/bin/steamos-session-select"
 
 echo "==> Building VaporOS ISO with mkarchiso..."

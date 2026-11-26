@@ -69,38 +69,49 @@ mount -o noatime,compress=zstd:3,subvol=@home "$ROOT_PART" /mnt/home
 mount "$EFI_PART" /mnt/boot
 
 echo "[3/6] Installing VaporOS base & gaming stack..."
-pacstrap -K /mnt \
+pacman-key --init
+pacman-key --populate archlinux
+pacstrap -P /mnt \
     base linux-zen linux-firmware-amdgpu linux-firmware-intel linux-firmware-realtek linux-firmware-atheros linux-firmware-mediatek amd-ucode intel-ucode \
     btrfs-progs zram-generator sudo polkit \
     networkmanager iwd bluez bluez-utils openssh curl \
     pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber lib32-pipewire lib32-libpulse \
     mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon vulkan-intel lib32-vulkan-intel \
     vulkan-icd-loader lib32-vulkan-icd-loader vulkan-mesa-layers lib32-vulkan-mesa-layers \
-    intel-media-driver \
+    vulkan-swrast lib32-vulkan-swrast intel-media-driver \
     gamescope steam mangohud lib32-mangohud gamemode lib32-gamemode \
     ttf-liberation ttf-dejavu ttf-jetbrains-mono-nerd \
     greetd greetd-tuigreet hyprland sway xorg-xwayland xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
-    qt5-wayland qt6-wayland waybar nwg-drawer papirus-icon-theme fuzzel foot mako libnotify wl-clipboard \
+    qt5-wayland qt6-wayland waybar papirus-icon-theme fuzzel foot mako libnotify wl-clipboard \
     grim slurp brightnessctl playerctl pavucontrol thunar gvfs swaybg polkit-gnome \
+    firefox python-gobject gtk-layer-shell \
     bash-completion git htop nano jq pciutils usbutils unzip zstd
 
 echo "[4/6] Generating fstab & copying VaporOS configurations..."
 genfstab -U /mnt >> /mnt/etc/fstab
 
 # Copy VaporOS custom scripts, configs, and skel from live environment
+mkdir -p /mnt/usr/local/bin /mnt/etc/vaporos /mnt/etc/NetworkManager/conf.d /mnt/etc/systemd/journald.conf.d /mnt/etc/systemd/logind.conf.d /mnt/etc/sysctl.d /mnt/etc/sudoers.d /mnt/etc/pacman.d /mnt/usr/share/applications /mnt/usr/lib/firefox/distribution
 cp -a /usr/local/bin/vaporos-* /mnt/usr/local/bin/
 cp -a /usr/bin/steamos-session-select /mnt/usr/bin/
 cp -a /etc/greetd /mnt/etc/
+cp -a /etc/vaporos /mnt/etc/
+cp -a /etc/environment /mnt/etc/environment
 cp -a /etc/sysctl.d/99-vaporos-gaming.conf /mnt/etc/sysctl.d/
 cp -a /etc/systemd/zram-generator.conf /mnt/etc/systemd/
 cp -a /etc/systemd/system/vaporos-firstboot.service /mnt/etc/systemd/system/
 cp -a /etc/NetworkManager/conf.d/wifi_backend.conf /mnt/etc/NetworkManager/conf.d/
 cp -a /etc/systemd/journald.conf.d/00-vaporos.conf /mnt/etc/systemd/journald.conf.d/
+cp -a /etc/systemd/logind.conf.d/00-vaporos.conf /mnt/etc/systemd/logind.conf.d/
 cp -a /etc/skel/. /mnt/etc/skel/
 cp -a /etc/pacman.conf /mnt/etc/pacman.conf
+cp -a /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
 cp -a /etc/os-release /mnt/etc/os-release
 cp -a /etc/sudoers.d/10-gamer /mnt/etc/sudoers.d/10-gamer
+chmod 750 /mnt/etc/sudoers.d
+chmod 440 /mnt/etc/sudoers.d/10-gamer
 cp -a /usr/share/applications/vaporos-*.desktop /mnt/usr/share/applications/
+cp -a /usr/lib/firefox/distribution/policies.json /mnt/usr/lib/firefox/distribution/policies.json
 
 echo "[5/6] Configuring system inside chroot..."
 ROOT_UUID="$(blkid -s UUID -o value "$ROOT_PART")"

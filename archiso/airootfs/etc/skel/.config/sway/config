@@ -25,7 +25,6 @@ client.unfocused        #232d3b #0e141b #8f98a0 #232d3b #232d3b
 
 # Autostart
 exec waybar
-exec /usr/local/bin/vaporos-dock-ctl start
 exec mako
 exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 

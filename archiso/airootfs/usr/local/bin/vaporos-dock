@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""
+VaporOS Bottom Dock — GNOME-inspired floating rounded capsule in matte VaporOS style.
+Shows crisp Papirus-Dark app icons, subtle running-app dots, divider, settings & 9-dot Apps grid.
+"""
+import os
+import signal
+import subprocess
+import sys
+
+LAYER_SO = "/usr/lib/libgtk-layer-shell.so"
+if os.path.exists(LAYER_SO) and LAYER_SO not in os.environ.get("LD_PRELOAD", ""):
+    env = os.environ.copy()
+    env["LD_PRELOAD"] = f"{LAYER_SO}:{env['LD_PRELOAD']}" if env.get("LD_PRELOAD") else LAYER_SO
+    os.execve(sys.executable, [sys.executable] + sys.argv, env)
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+HAS_LAYER_SHELL = False
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell
+    HAS_LAYER_SHELL = True
+except Exception:
+    pass
+
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window {
+    background-color: transparent;
+    border: none;
+}
+.dock-pill {
+    background-color: rgba(20, 24, 31, 0.92);
+    border: 1px solid #293240;
+    border-radius: 20px;
+    padding: 6px 10px;
+}
+button.dock-item {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 13px;
+    padding: 6px 7px 3px 7px;
+    transition: background-color 140ms ease, border-color 140ms ease;
+}
+button.dock-item:hover {
+    background-color: rgba(207, 216, 227, 0.10);
+    border-color: rgba(140, 165, 195, 0.18);
+}
+button.dock-item:active {
+    background-color: rgba(75, 155, 229, 0.18);
+}
+.dot {
+    min-width: 4px;
+    min-height: 4px;
+    border-radius: 50%;
+    background-color: transparent;
+    margin-top: 3px;
+}
+.dot-active {
+    background-color: #8fb4d6;
+}
+.dock-sep {
+    background-color: #2c3544;
+    min-width: 1px;
+    margin: 8px 4px;
+}
+.grid-icon {
+    font-family: "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 24px;
+    color: #c7d3e0;
+}
+"""
+
+
+DOCK_APPS = [
+    ("Файлы", "system-file-manager", ["thunar"], "thunar"),
+    ("Терминал", "utilities-terminal", ["foot"], "foot"),
+    ("Firefox", "firefox", ["env", "GTK_THEME=Adwaita:dark", "firefox"], "firefox"),
+    ("Gaming Mode (SteamOS)", "steam", ["/usr/local/bin/vaporos-switch-session", "gaming"], "steam"),
+]
+
+DOCK_RIGHT = [
+    ("Настройки VaporOS", "preferences-system", ["/usr/local/bin/vaporos-settings"], "vaporos-settings"),
+]
+
+
+def get_running_comms():
+    comms = set()
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/comm", "r") as f:
+                    comms.add(f.read().strip())
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return comms
+
+
+class VaporDock(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="VaporOS Dock")
+        self.set_resizable(False)
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+
+        if HAS_LAYER_SHELL:
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, 10)
+            GtkLayerShell.set_exclusive_zone(self, 68)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("destroy", Gtk.main_quit)
+
+        pill = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        pill.get_style_context().add_class("dock-pill")
+        self.add(pill)
+
+        self.dots = []
+        icon_theme = Gtk.IconTheme.get_default()
+
+        def make_item(tooltip, icon_name, cmd, proc_name):
+            btn = Gtk.Button()
+            btn.set_tooltip_text(tooltip)
+            btn.get_style_context().add_class("dock-item")
+
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            vbox.set_halign(Gtk.Align.CENTER)
+
+            if icon_theme.has_icon(icon_name):
+                img = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.DIALOG)
+                img.set_pixel_size(40)
+            else:
+                img = Gtk.Image.new_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG)
+                img.set_pixel_size(40)
+
+            dot = Gtk.Box()
+            dot.set_halign(Gtk.Align.CENTER)
+            dot.get_style_context().add_class("dot")
+
+            vbox.pack_start(img, False, False, 0)
+            vbox.pack_start(dot, False, False, 0)
+            btn.add(vbox)
+            btn.connect("clicked", lambda *_: subprocess.Popen(cmd, start_new_session=True))
+            if proc_name:
+                self.dots.append((proc_name, dot))
+            return btn
+
+        for tip, icon, cmd, proc in DOCK_APPS:
+            pill.pack_start(make_item(tip, icon, cmd, proc), False, False, 0)
+
+        # Hairline vertical divider (like GNOME dock)
+        sep = Gtk.Box()
+        sep.get_style_context().add_class("dock-sep")
+        pill.pack_start(sep, False, False, 2)
+
+        for tip, icon, cmd, proc in DOCK_RIGHT:
+            pill.pack_start(make_item(tip, icon, cmd, proc), False, False, 0)
+
+        # 9-dot Apps Grid button
+        apps_btn = Gtk.Button()
+        apps_btn.set_tooltip_text("Все приложения [Super+Space]")
+        apps_btn.get_style_context().add_class("dock-item")
+        avbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        avbox.set_halign(Gtk.Align.CENTER)
+        if icon_theme.has_icon("view-app-grid-symbolic"):
+            aimg = Gtk.Image.new_from_icon_name("view-app-grid-symbolic", Gtk.IconSize.DIALOG)
+            aimg.set_pixel_size(30)
+            avbox.pack_start(aimg, False, False, 2)
+        else:
+            albl = Gtk.Label(label="󰀻")
+            albl.get_style_context().add_class("grid-icon")
+            avbox.pack_start(albl, False, False, 2)
+        adot = Gtk.Box()
+        adot.set_halign(Gtk.Align.CENTER)
+        adot.get_style_context().add_class("dot")
+        avbox.pack_start(adot, False, False, 0)
+        apps_btn.add(avbox)
+        apps_btn.connect("clicked", lambda *_: subprocess.Popen(["/usr/local/bin/vaporos-apps"], start_new_session=True))
+        pill.pack_start(apps_btn, False, False, 0)
+
+        self.update_dots()
+        GLib.timeout_add(2000, self.update_dots)
+        self.show_all()
+
+    def update_dots(self):
+        comms = get_running_comms()
+        for proc_name, dot in self.dots:
+            ctx = dot.get_style_context()
+            if any(proc_name in c for c in comms):
+                ctx.add_class("dot-active")
+            else:
+                ctx.remove_class("dot-active")
+        return True
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: Gtk.main_quit())
+    VaporDock()
+    Gtk.main()

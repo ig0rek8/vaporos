@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""
+VaporOS Network Manager — Clean dark matte Steam-inspired GTK3 Wi-Fi & Ethernet UI.
+"""
+import subprocess
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window, dialog {
+    background-color: #191d24;
+    color: #cfd8e3;
+    font-family: "Adwaita Sans", "DejaVu Sans", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 12.5px;
+}
+.hdr-title {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #d0dae5;
+}
+.sub-lbl {
+    font-size: 11px;
+    color: #77879a;
+}
+.card {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.net-row {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 7px;
+    padding: 8px 10px;
+}
+.net-row:hover {
+    background-color: #202834;
+    border-color: #34455b;
+}
+.status-ok {
+    color: #5bb98c;
+    font-weight: 700;
+}
+.status-muted {
+    color: #77879a;
+}
+button {
+    background-color: #202733;
+    color: #c2cdd9;
+    border: 1px solid #2c3647;
+    border-radius: 6px;
+    padding: 6px 11px;
+    font-weight: 600;
+}
+button:hover {
+    background-color: #293445;
+    border-color: #3d7ec2;
+    color: #dce4ee;
+}
+button.primary {
+    background-color: #25588a;
+    border-color: #3570a8;
+    color: #d8e4f0;
+}
+button.primary:hover {
+    background-color: #2f6ca8;
+}
+button.danger:hover {
+    background-color: #3b2229;
+    border-color: #7d3a49;
+    color: #e6a8b2;
+}
+entry {
+    background-color: #0e1318;
+    color: #d0dae5;
+    border: 1px solid #2c3647;
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+entry:focus {
+    border-color: #3d7ec2;
+}
+scrolledwindow, viewport {
+    background-color: #191d24;
+    border: none;
+}
+"""
+
+
+def run_cmd(cmd, timeout=4.0):
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True, timeout=timeout).strip()
+    except Exception:
+        return ""
+
+
+def sig_icon(strength):
+    try:
+        s = int(strength)
+    except Exception:
+        return "󰤯"
+    if s >= 75:
+        return "󰤨"
+    if s >= 50:
+        return "󰤥"
+    if s >= 25:
+        return "󰤢"
+    return "󰤟"
+
+
+class NetworkManagerWin(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="VaporOS — Сети и Wi-Fi")
+        self.set_default_size(460, 440)
+        self.set_position(Gtk.WindowPosition.CENTER)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("key-press-event", self.on_key)
+        self.connect("destroy", Gtk.main_quit)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_border_width(14)
+        self.add(root)
+
+        # Header
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        t = Gtk.Label(label="󰖩  Сети и Wi-Fi", xalign=0)
+        t.get_style_context().add_class("hdr-title")
+        rescan_btn = Gtk.Button(label="󰑐  Обновить")
+        rescan_btn.connect("clicked", lambda *_: self.refresh(rescan=True))
+        close_btn = Gtk.Button(label="✕")
+        close_btn.connect("clicked", lambda *_: self.close())
+        hdr.pack_start(t, True, True, 0)
+        hdr.pack_end(close_btn, False, False, 0)
+        hdr.pack_end(rescan_btn, False, False, 0)
+        root.pack_start(hdr, False, False, 0)
+
+        # Active Connection Card
+        self.active_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.active_card.get_style_context().add_class("card")
+        ac_lbl = Gtk.Label(label="АКТИВНОЕ ПОДКЛЮЧЕНИЕ", xalign=0)
+        ac_lbl.get_style_context().add_class("sub-lbl")
+        self.active_info = Gtk.Label(label="Проверка...", xalign=0)
+        self.active_ip = Gtk.Label(label="", xalign=0)
+        self.active_ip.get_style_context().add_class("sub-lbl")
+        self.active_card.pack_start(ac_lbl, False, False, 0)
+        self.active_card.pack_start(self.active_info, False, False, 0)
+        self.active_card.pack_start(self.active_ip, False, False, 0)
+        root.pack_start(self.active_card, False, False, 0)
+
+        # Wi-Fi List Header
+        wl = Gtk.Label(label="ДОСТУПНЫЕ WI-FI СЕТИ", xalign=0)
+        wl.get_style_context().add_class("sub-lbl")
+        root.pack_start(wl, False, False, 0)
+
+        # Scrollable Wi-Fi List
+        sc = Gtk.ScrolledWindow()
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        sc.add(self.list_box)
+        root.pack_start(sc, True, True, 0)
+
+        # Status bar
+        self.status_lbl = Gtk.Label(label="", xalign=0)
+        self.status_lbl.get_style_context().add_class("sub-lbl")
+        root.pack_start(self.status_lbl, False, False, 0)
+
+        self.show_all()
+        GLib.idle_add(self.refresh, False)
+
+    def on_key(self, _w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
+
+    def refresh(self, rescan=False):
+        self.status_lbl.set_text("Обновление списка сетей...")
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+
+        # Active connection & IP
+        active = run_cmd(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"])
+        lines = [l for l in active.splitlines() if l and ":lo" not in l]
+        if lines:
+            name, ctype, dev = (lines[0].split(":") + ["", "", ""])[:3]
+            ip = run_cmd(["nmcli", "-g", "IP4.ADDRESS", "device", "show", dev])
+            icon = "󰈀" if "ethernet" in ctype else ""
+            self.active_info.set_text(f"{icon}  {name}  ({dev})")
+            self.active_info.get_style_context().add_class("status-ok")
+            self.active_ip.set_text(f"IP: {ip or 'получение...'}")
+        else:
+            self.active_info.set_text("󰤭  Нет активного подключения")
+            self.active_ip.set_text("")
+
+        # Clear list
+        for child in self.list_box.get_children():
+            self.list_box.remove(child)
+
+        if rescan:
+            run_cmd(["nmcli", "device", "wifi", "rescan"], timeout=3.0)
+
+        wifi_out = run_cmd(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list"])
+        seen = set()
+        rows_added = 0
+        for line in wifi_out.splitlines():
+            parts = line.split(":")
+            if len(parts) < 4:
+                continue
+            in_use, ssid, signal, sec = parts[0], parts[1].strip(), parts[2], parts[3]
+            if not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            rows_added += 1
+
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.get_style_context().add_class("net-row")
+            lock = " " if sec and sec != "--" else ""
+            lbl = Gtk.Label(label=f"{sig_icon(signal)}  {ssid}{lock}  ({signal}%)", xalign=0)
+            row.pack_start(lbl, True, True, 0)
+
+            if in_use == "*":
+                btn = Gtk.Button(label="Отключить")
+                btn.get_style_context().add_class("danger")
+                btn.connect("clicked", lambda _b, s=ssid: self.disconnect_net(s))
+            else:
+                btn = Gtk.Button(label="Подключить")
+                btn.get_style_context().add_class("primary")
+                btn.connect("clicked", lambda _b, s=ssid, sc=sec: self.connect_wifi(s, sc))
+            row.pack_end(btn, False, False, 0)
+            self.list_box.pack_start(row, False, False, 0)
+
+        if rows_added == 0:
+            empty = Gtk.Label(label="Wi-Fi адаптер не найден или сети отсутствуют (подключено по Ethernet).", xalign=0)
+            empty.set_line_wrap(True)
+            empty.get_style_context().add_class("status-muted")
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            card.get_style_context().add_class("card")
+            card.pack_start(empty, False, False, 0)
+            self.list_box.pack_start(card, False, False, 0)
+
+        self.list_box.show_all()
+        self.status_lbl.set_text("Готово")
+        return False
+
+    def disconnect_net(self, ssid):
+        subprocess.run(["nmcli", "connection", "down", ssid], stderr=subprocess.DEVNULL)
+        self.refresh(rescan=False)
+
+    def connect_wifi(self, ssid, sec):
+        password = None
+        if sec and sec != "--":
+            dlg = Gtk.Dialog(title=f"Пароль для {ssid}", transient_for=self, modal=True)
+            dlg.add_button("Отмена", Gtk.ResponseType.CANCEL)
+            dlg.add_button("Подключить", Gtk.ResponseType.OK)
+            box = dlg.get_content_area()
+            box.set_border_width(12)
+            box.set_spacing(8)
+            box.add(Gtk.Label(label=f"Введите пароль Wi-Fi ({ssid}):", xalign=0))
+            entry = Gtk.Entry()
+            entry.set_visibility(False)
+            entry.set_activates_default(True)
+            box.add(entry)
+            dlg.set_default_response(Gtk.ResponseType.OK)
+            dlg.show_all()
+            resp = dlg.run()
+            password = entry.get_text() if resp == Gtk.ResponseType.OK else None
+            dlg.destroy()
+            if password is None:
+                return
+
+        self.status_lbl.set_text(f"Подключение к {ssid}...")
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+        cmd = ["nmcli", "device", "wifi", "connect", ssid]
+        if password:
+            cmd += ["password", password]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            self.status_lbl.set_text(f"Подключено к {ssid}")
+        else:
+            self.status_lbl.set_text(f"Ошибка: {(res.stderr or res.stdout).strip()[:60]}")
+        self.refresh(rescan=False)
+
+
+if __name__ == "__main__":
+    NetworkManagerWin()
+    Gtk.main()

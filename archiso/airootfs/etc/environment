@@ -1,0 +1,6 @@
+#
+# This file is parsed by pam_env module
+#
+# Syntax: simple "KEY=VAL" pairs on separate lines
+#
+MALLOC_ARENA_MAX=2

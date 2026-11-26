@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""
+VaporOS Bluetooth Manager — Clean dark matte Steam-inspired GTK3 UI.
+"""
+import os
+import subprocess
+import threading
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window {
+    background-color: #191d24;
+    color: #cfd8e3;
+    font-family: "Adwaita Sans", "DejaVu Sans", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 12.5px;
+}
+.hdr-title {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: #d0dae5;
+}
+.sub-lbl {
+    font-size: 11px;
+    color: #77879a;
+}
+.card {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.dev-row {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 7px;
+    padding: 8px 10px;
+}
+.dev-row:hover {
+    background-color: #202834;
+    border-color: #34455b;
+}
+button {
+    background-color: #202733;
+    color: #c2cdd9;
+    border: 1px solid #2c3647;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-weight: 600;
+}
+button:hover {
+    background-color: #293445;
+    border-color: #3d7ec2;
+    color: #dce4ee;
+}
+button.primary {
+    background-color: #25588a;
+    border-color: #3570a8;
+    color: #d8e4f0;
+}
+button.primary:hover {
+    background-color: #2f6ca8;
+}
+button.danger:hover {
+    background-color: #3b2229;
+    border-color: #7d3a49;
+    color: #e6a8b2;
+}
+scrolledwindow, viewport {
+    background-color: #191d24;
+    border: none;
+}
+"""
+
+
+def run_bt(args, timeout=2.0):
+    try:
+        return subprocess.check_output(
+            ["bluetoothctl"] + args, stderr=subprocess.DEVNULL, text=True, timeout=timeout
+        ).strip()
+    except Exception:
+        return ""
+
+
+class BluetoothWin(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="VaporOS — Bluetooth")
+        self.set_default_size(460, 420)
+        self.set_position(Gtk.WindowPosition.CENTER)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("key-press-event", self.on_key)
+        self.connect("destroy", Gtk.main_quit)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_border_width(14)
+        self.add(root)
+
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        t = Gtk.Label(label="  Настройки Bluetooth", xalign=0)
+        t.get_style_context().add_class("hdr-title")
+        self.scan_btn = Gtk.Button(label="󰑐  Поиск")
+        self.scan_btn.connect("clicked", self.on_scan)
+        close_btn = Gtk.Button(label="✕")
+        close_btn.connect("clicked", lambda *_: self.close())
+        hdr.pack_start(t, True, True, 0)
+        hdr.pack_end(close_btn, False, False, 0)
+        hdr.pack_end(self.scan_btn, False, False, 0)
+        root.pack_start(hdr, False, False, 0)
+
+        # Adapter status card
+        adapter_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        adapter_card.get_style_context().add_class("card")
+        self.adapter_lbl = Gtk.Label(label="Проверка адаптера...", xalign=0)
+        self.power_btn = Gtk.Button(label="Вкл / Выкл")
+        self.power_btn.connect("clicked", self.on_toggle_power)
+        adapter_card.pack_start(self.adapter_lbl, True, True, 0)
+        adapter_card.pack_end(self.power_btn, False, False, 0)
+        root.pack_start(adapter_card, False, False, 0)
+
+        dl = Gtk.Label(label="УСТРОЙСТВА (ГЕЙМПАДЫ / АУДИО / ПЕРИФЕРИЯ)", xalign=0)
+        dl.get_style_context().add_class("sub-lbl")
+        root.pack_start(dl, False, False, 0)
+
+        sc = Gtk.ScrolledWindow()
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        sc.add(self.list_box)
+        root.pack_start(sc, True, True, 0)
+
+        self.status_lbl = Gtk.Label(label="", xalign=0)
+        self.status_lbl.get_style_context().add_class("sub-lbl")
+        root.pack_start(self.status_lbl, False, False, 0)
+
+        self.powered = False
+        self.show_all()
+        GLib.idle_add(self.refresh)
+
+    def on_key(self, _w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
+
+    def has_adapter(self):
+        return os.path.isdir("/sys/class/bluetooth") and bool(os.listdir("/sys/class/bluetooth"))
+
+    def refresh(self):
+        for child in self.list_box.get_children():
+            self.list_box.remove(child)
+
+        if not self.has_adapter():
+            self.adapter_lbl.set_text("  Bluetooth-адаптер не обнаружен")
+            self.power_btn.set_sensitive(False)
+            self.scan_btn.set_sensitive(False)
+            msg = Gtk.Label(
+                label="Адаптер не найден. На реальном ПК он заработает автоматически; в VMware подключи USB-Bluetooth через меню VM -> Removable Devices.",
+                xalign=0,
+            )
+            msg.set_line_wrap(True)
+            msg.get_style_context().add_class("sub-lbl")
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            card.get_style_context().add_class("card")
+            card.pack_start(msg, False, False, 0)
+            self.list_box.pack_start(card, False, False, 0)
+            self.list_box.show_all()
+            self.status_lbl.set_text("Нет адаптера")
+            return False
+
+        info = run_bt(["show"], timeout=1.5)
+        self.powered = "Powered: yes" in info
+        self.power_btn.set_sensitive(True)
+        self.scan_btn.set_sensitive(self.powered)
+        self.adapter_lbl.set_text("  Адаптер: Включён" if self.powered else "  Адаптер: Выключен")
+        self.power_btn.set_label("Выключить" if self.powered else "Включить")
+
+        devs = run_bt(["devices"], timeout=1.5)
+        count = 0
+        for line in devs.splitlines():
+            if not line.startswith("Device "):
+                continue
+            parts = line.split(" ", 2)
+            if len(parts) < 3:
+                continue
+            mac, name = parts[1], parts[2]
+            dinfo = run_bt(["info", mac], timeout=1.0)
+            connected = "Connected: yes" in dinfo
+            count += 1
+
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.get_style_context().add_class("dev-row")
+            badge = "● " if connected else "○ "
+            lbl = Gtk.Label(label=f"{badge}{name}", xalign=0)
+            row.pack_start(lbl, True, True, 0)
+
+            if connected:
+                btn = Gtk.Button(label="Отключить")
+                btn.connect("clicked", lambda _b, m=mac: self.bt_action("disconnect", m))
+            else:
+                btn = Gtk.Button(label="Подключить")
+                btn.get_style_context().add_class("primary")
+                btn.connect("clicked", lambda _b, m=mac: self.bt_action("connect", m))
+            rm_btn = Gtk.Button(label="✕")
+            rm_btn.get_style_context().add_class("danger")
+            rm_btn.set_tooltip_text("Забыть устройство")
+            rm_btn.connect("clicked", lambda _b, m=mac: self.bt_action("remove", m))
+
+            row.pack_end(rm_btn, False, False, 0)
+            row.pack_end(btn, False, False, 0)
+            self.list_box.pack_start(row, False, False, 0)
+
+        if count == 0:
+            empty = Gtk.Label(label="Устройств пока нет. Нажми «Поиск», чтобы найти геймпад или наушники.", xalign=0)
+            empty.set_line_wrap(True)
+            empty.get_style_context().add_class("sub-lbl")
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            card.get_style_context().add_class("card")
+            card.pack_start(empty, False, False, 0)
+            self.list_box.pack_start(card, False, False, 0)
+
+        self.list_box.show_all()
+        self.status_lbl.set_text("Готово")
+        return False
+
+    def on_toggle_power(self, *_):
+        if not self.powered:
+            subprocess.run(["sudo", "-n", "rfkill", "unblock", "bluetooth"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "-n", "systemctl", "start", "bluetooth"], stderr=subprocess.DEVNULL)
+        run_bt(["power", "off" if self.powered else "on"], timeout=2.0)
+        self.refresh()
+
+    def on_scan(self, *_):
+        self.status_lbl.set_text("Поиск устройств (5 сек)...")
+        self.scan_btn.set_sensitive(False)
+
+        def worker():
+            try:
+                subprocess.run(["bluetoothctl", "--timeout", "5", "scan", "on"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+            except Exception:
+                pass
+            GLib.idle_add(self.refresh)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def bt_action(self, action, mac):
+        self.status_lbl.set_text(f"Выполняю {action}...")
+        def worker():
+            if action == "connect":
+                run_bt(["pair", mac], timeout=4.0)
+                run_bt(["trust", mac], timeout=2.0)
+            run_bt([action, mac], timeout=4.0)
+            GLib.idle_add(self.refresh)
+        threading.Thread(target=worker, daemon=True).start()
+
+
+if __name__ == "__main__":
+    BluetoothWin()
+    Gtk.main()

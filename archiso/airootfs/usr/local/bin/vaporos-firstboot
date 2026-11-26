@@ -19,8 +19,14 @@ if [[ ! -f /home/gamer/.vaporos-initialized ]]; then
     echo "root:vaporos" | chpasswd
     echo "gamer:gamer" | chpasswd
 
-    mkdir -p /home/gamer
+    mkdir -p /home/gamer/Downloads /home/gamer/Pictures /home/gamer/Games /home/gamer/Documents /home/gamer/Desktop
     cp -a /etc/skel/. /home/gamer/
+    cat > /home/gamer/.config/gtk-3.0/bookmarks <<'BM'
+file:///home/gamer/Downloads Downloads
+file:///home/gamer/Pictures Pictures
+file:///home/gamer/Games Games
+file:///home/gamer/Documents Documents
+BM
     touch /home/gamer/.vaporos-initialized
     chown -R gamer:gamer /home/gamer
 fi

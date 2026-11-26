@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+VaporOS Centered App Grid — GNOME-inspired 4-column matte dark app launcher.
+Centered on screen via GtkLayerShell, crisp 44px Papirus-Dark icons, smooth fade animation.
+"""
+import os
+import signal
+import subprocess
+import sys
+
+PID_FILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vaporos-apps.pid")
+
+LAYER_SO = "/usr/lib/libgtk-layer-shell.so"
+if os.path.exists(LAYER_SO) and LAYER_SO not in os.environ.get("LD_PRELOAD", ""):
+    env = os.environ.copy()
+    env["LD_PRELOAD"] = f"{LAYER_SO}:{env['LD_PRELOAD']}" if env.get("LD_PRELOAD") else LAYER_SO
+    os.execve(sys.executable, [sys.executable] + sys.argv, env)
+
+if os.path.exists(PID_FILE):
+    try:
+        with open(PID_FILE, "r") as f:
+            old_pid = int(f.read().strip())
+        os.kill(old_pid, signal.SIGUSR1)
+        sys.exit(0)
+    except Exception:
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+
+with open(PID_FILE, "w") as f:
+    f.write(str(os.getpid()))
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("Gio", "2.0")
+from gi.repository import Gtk, Gdk, Gio, GLib
+
+HAS_LAYER_SHELL = False
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell
+    HAS_LAYER_SHELL = True
+except Exception:
+    pass
+
+
+HIDE_DUPLICATES = {"foot client", "foot server", "bulk rename", "avahi ssh server browser", "avahi vnc server browser", "avahi zeroconf browser"}
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window {
+    background-color: transparent;
+    border: none;
+    color: #cfd8e3;
+    font-family: "Adwaita Sans", "DejaVu Sans", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 12.5px;
+}
+.apps-frame {
+    background-color: rgba(25, 29, 36, 0.96);
+    border: 1px solid #2b3545;
+    border-radius: 20px;
+}
+.title-lbl {
+    font-size: 14px;
+    font-weight: 700;
+    color: #c7d3e0;
+}
+entry.search {
+    background-color: #11151c;
+    color: #d4dde8;
+    border: 1px solid #2a3546;
+    border-radius: 22px;
+    padding: 9px 16px;
+    font-size: 13px;
+    transition: border-color 150ms ease, background-color 150ms ease;
+}
+entry.search:focus {
+    background-color: #141a22;
+    border-color: rgba(255, 255, 255, 0.10);
+}
+button.app-tile {
+    background-color: transparent;
+    color: #c8d4e0;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    padding: 14px 10px 11px 10px;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+button.app-tile:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.10);
+    color: #e4edf6;
+}
+button.app-tile:active {
+    background-color: rgba(37, 88, 138, 0.65);
+}
+.app-name {
+    font-size: 11.5px;
+    font-weight: 600;
+    margin-top: 8px;
+}
+button.close-btn {
+    background-color: rgba(28, 35, 45, 0.8);
+    color: #8594a6;
+    border: 1px solid #293342;
+    border-radius: 10px;
+    padding: 4px 10px;
+    transition: background-color 150ms ease, color 150ms ease;
+}
+button.close-btn:hover {
+    background-color: #2f1d23;
+    border-color: #5c2e39;
+    color: #d9828e;
+}
+scrolledwindow, viewport, flowbox, flowboxchild {
+    background-color: transparent;
+    border: none;
+}
+scrollbar, scrollbar trough {
+    background-color: transparent;
+    border: none;
+}
+scrollbar slider {
+    background-color: #2c3747;
+    border-radius: 6px;
+    min-width: 5px;
+}
+scrollbar slider:hover {
+    background-color: #4b9be5;
+}
+"""
+
+
+class AppsGrid(Gtk.Window):
+    ANIM_STEPS = 12
+
+    def __init__(self):
+        super().__init__(title="VaporOS Apps")
+        self.set_default_size(680, 520)
+        self.set_resizable(False)
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+        self.set_opacity(0.0)
+
+        self._closing = False
+        self._anim_step = 0
+        self._anim_id = None
+
+        if HAS_LAYER_SHELL:
+            # Leave all 4 anchors False -> centered cleanly in the middle of the screen!
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.ON_DEMAND)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("key-press-event", self.on_key_press)
+        self.connect("destroy", self.on_destroy)
+
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        frame.get_style_context().add_class("apps-frame")
+        self.add(frame)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        root.set_border_width(20)
+        frame.pack_start(root, True, True, 0)
+
+        # Header + centered search bar
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        tl = Gtk.Label(label="󰀻  Приложения", xalign=0)
+        tl.get_style_context().add_class("title-lbl")
+
+        self.search = Gtk.Entry()
+        self.search.set_placeholder_text("  Поиск приложений...")
+        self.search.set_width_chars(28)
+        self.search.get_style_context().add_class("search")
+        self.search.connect("changed", self.on_filter)
+        self.search.connect("activate", self.on_launch_first)
+
+        cb = Gtk.Button(label="✕")
+        cb.get_style_context().add_class("close-btn")
+        cb.connect("clicked", lambda *_: self.animate_close())
+
+        hdr.pack_start(tl, False, False, 0)
+        hdr.pack_start(self.search, True, True, 8)
+        hdr.pack_end(cb, False, False, 0)
+        root.pack_start(hdr, False, False, 0)
+
+        # 4-Column Centered App Grid
+        sc = Gtk.ScrolledWindow()
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.flow = Gtk.FlowBox()
+        self.flow.set_valign(Gtk.Align.START)
+        self.flow.set_min_children_per_line(4)
+        self.flow.set_max_children_per_line(4)
+        self.flow.set_row_spacing(10)
+        self.flow.set_column_spacing(10)
+        self.flow.set_homogeneous(True)
+        self.flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        sc.add(self.flow)
+        root.pack_start(sc, True, True, 0)
+
+        self.apps = []
+        seen = set()
+        for info in Gio.AppInfo.get_all():
+            if not info.should_show():
+                continue
+            name = (info.get_display_name() or info.get_name() or "").strip()
+            low = name.lower()
+            if not name or low in HIDE_DUPLICATES or low in seen:
+                continue
+            seen.add(low)
+            self.apps.append((name, info))
+        self.apps.sort(key=lambda x: x[0].lower())
+
+        self.visible_apps = []
+        self.populate("")
+
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._on_sig)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._on_sig)
+
+        self.show_all()
+        self.search.grab_focus()
+        self.animate_open()
+
+    def populate(self, query):
+        q = query.strip().lower()
+        for child in self.flow.get_children():
+            self.flow.remove(child)
+        self.visible_apps = []
+
+        for name, info in self.apps:
+            desc = (info.get_description() or "").lower()
+            if q and q not in name.lower() and q not in desc:
+                continue
+            self.visible_apps.append(info)
+
+            btn = Gtk.Button()
+            btn.set_size_request(142, 108)
+            btn.get_style_context().add_class("app-tile")
+
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            vbox.set_halign(Gtk.Align.CENTER)
+            vbox.set_valign(Gtk.Align.CENTER)
+
+            icon = info.get_icon()
+            if icon:
+                img = Gtk.Image.new_from_gicon(icon, Gtk.IconSize.DIALOG)
+                img.set_pixel_size(44)
+            else:
+                img = Gtk.Image.new_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG)
+                img.set_pixel_size(44)
+
+            lbl = Gtk.Label(label=name)
+            lbl.set_max_width_chars(15)
+            lbl.set_ellipsize(3)
+            lbl.set_justify(Gtk.Justification.CENTER)
+            lbl.get_style_context().add_class("app-name")
+
+            vbox.pack_start(img, False, False, 0)
+            vbox.pack_start(lbl, False, False, 0)
+            btn.add(vbox)
+            btn.connect("clicked", lambda _b, app=info: self.launch_app(app))
+            self.flow.add(btn)
+
+        self.flow.show_all()
+
+    def on_filter(self, entry):
+        self.populate(entry.get_text())
+
+    def on_launch_first(self, *_):
+        if self.visible_apps:
+            self.launch_app(self.visible_apps[0])
+
+    def launch_app(self, app):
+        try:
+            app.launch([], None)
+        except Exception:
+            cmd = app.get_executable()
+            if cmd:
+                subprocess.Popen([cmd], start_new_session=True)
+        self.animate_close()
+
+    def animate_open(self):
+        self._closing = False
+        self._anim_step = 0
+        if self._anim_id:
+            GLib.source_remove(self._anim_id)
+        self._anim_id = GLib.timeout_add(14, self._tick_open)
+
+    def _tick_open(self):
+        self._anim_step += 1
+        t = min(1.0, self._anim_step / self.ANIM_STEPS)
+        ease = 1.0 - (1.0 - t) ** 3
+        self.set_opacity(0.98 * ease)
+        if t >= 1.0:
+            self._anim_id = None
+            return False
+        return True
+
+    def animate_close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._anim_step = 0
+        if self._anim_id:
+            GLib.source_remove(self._anim_id)
+        self._anim_id = GLib.timeout_add(12, self._tick_close)
+
+    def _tick_close(self):
+        self._anim_step += 1
+        t = min(1.0, self._anim_step / 9.0)
+        ease = t * t
+        self.set_opacity(max(0.0, 0.98 * (1.0 - ease)))
+        if t >= 1.0:
+            self._anim_id = None
+            self.close()
+            return False
+        return True
+
+    def _on_sig(self):
+        self.animate_close()
+        return True
+
+    def on_key_press(self, _w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.animate_close()
+            return True
+        return False
+
+    def on_destroy(self, *_):
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+        Gtk.main_quit()
+
+
+if __name__ == "__main__":
+    AppsGrid()
+    Gtk.main()

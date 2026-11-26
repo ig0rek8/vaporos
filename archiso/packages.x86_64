@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # VaporOS Minimal Package List (x86_64)
 # Target: Ultra-low RAM, zero bloat, AMD + Intel Mesa open drivers,
 #         Steam Big Picture (gamescope) + Hyprland Desktop Mode.
@@ -55,6 +55,8 @@ vulkan-icd-loader
 lib32-vulkan-icd-loader
 vulkan-mesa-layers
 lib32-vulkan-mesa-layers
+vulkan-swrast
+lib32-vulkan-swrast
 intel-media-driver
 
 # --- Gaming Mode (Gamescope + Steam + Performance Tools) ---
@@ -72,7 +74,7 @@ ttf-jetbrains-mono-nerd
 greetd
 greetd-tuigreet
 
-# --- Desktop Mode (Hyprland + Sway VM/Fallback — Minimal & Fast) ---
+# --- Desktop Mode (Hyprland + Sway VM/Fallback â€” Minimal & Fast) ---
 hyprland
 sway
 xorg-xwayland
@@ -81,7 +83,6 @@ xdg-desktop-portal-gtk
 qt5-wayland
 qt6-wayland
 waybar
-nwg-drawer
 papirus-icon-theme
 fuzzel
 foot
@@ -97,6 +98,9 @@ thunar
 gvfs
 swaybg
 polkit-gnome
+firefox
+python-gobject
+gtk-layer-shell
 
 # --- Essential CLI Utilities (No Bloat) ---
 bash-completion

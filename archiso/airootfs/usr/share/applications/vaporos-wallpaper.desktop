@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Обои рабочего стола (Wallpaper)
+Comment=Сменить фон или обои рабочего стола VaporOS
+Exec=/usr/local/bin/vaporos-wallpaper
+Icon=preferences-desktop-wallpaper
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;

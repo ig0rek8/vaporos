@@ -1,0 +1,19 @@
+{
+  "policies": {
+    "PromptForDownloadLocation": true,
+    "Preferences": {
+      "browser.download.useDownloadDir": {
+        "Value": false,
+        "Status": "default"
+      },
+      "layout.css.prefers-color-scheme.content-override": {
+        "Value": 0,
+        "Status": "default"
+      },
+      "ui.systemUsesDarkTheme": {
+        "Value": 1,
+        "Status": "default"
+      }
+    }
+  }
+}

@@ -46,8 +46,6 @@ sleep 0.3
 nohup waybar >/dev/null 2>&1 &
 disown 2>/dev/null || true
 
-/usr/local/bin/vaporos-dock-ctl start
-
 if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
     hyprctl reload >/dev/null 2>&1 || true
 elif [[ -n "${SWAYSOCK:-}" ]]; then

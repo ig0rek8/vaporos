@@ -1,0 +1,563 @@
+#!/usr/bin/env python3
+"""
+VaporOS Quick Drawer — Restrained matte-graphite control panel with smooth slide/fade animation.
+Running while already open sends SIGUSR1 to animate-close cleanly.
+"""
+import os
+import signal
+import subprocess
+import sys
+
+PID_FILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "vaporos-quickpanel.pid")
+
+# Preload libgtk-layer-shell for native Wayland overlay anchoring
+LAYER_SO = "/usr/lib/libgtk-layer-shell.so"
+if os.path.exists(LAYER_SO) and LAYER_SO not in os.environ.get("LD_PRELOAD", ""):
+    env = os.environ.copy()
+    env["LD_PRELOAD"] = f"{LAYER_SO}:{env['LD_PRELOAD']}" if env.get("LD_PRELOAD") else LAYER_SO
+    os.execve(sys.executable, [sys.executable] + sys.argv, env)
+
+# Toggle: if already running, ask it to animate-close via SIGUSR1
+if os.path.exists(PID_FILE):
+    try:
+        with open(PID_FILE, "r") as f:
+            old_pid = int(f.read().strip())
+        os.kill(old_pid, signal.SIGUSR1)
+        sys.exit(0)
+    except Exception:
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+
+with open(PID_FILE, "w") as f:
+    f.write(str(os.getpid()))
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+HAS_LAYER_SHELL = False
+try:
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import GtkLayerShell
+    HAS_LAYER_SHELL = True
+except Exception:
+    pass
+
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window {
+    background-color: transparent;
+    border: none;
+    color: #cfd8e3;
+    font-family: "Adwaita Sans", "DejaVu Sans", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 12.5px;
+}
+.drawer-frame {
+    background-color: rgba(25, 29, 36, 0.97);
+    border: 1px solid #283242;
+    border-radius: 16px;
+}
+.brand {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #c2cdd9;
+    letter-spacing: 0.4px;
+}
+.section-lbl {
+    font-size: 11px;
+    font-weight: 600;
+    color: #77879a;
+}
+.metric-val {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #cfd8e3;
+}
+.tile {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.tile-compact {
+    background-color: #20252e;
+    border: 1px solid #282e39;
+    border-radius: 8px;
+    padding: 8px 11px;
+}
+separator.divider {
+    background-color: #222a36;
+    min-height: 1px;
+}
+progressbar trough {
+    background-color: #10141a;
+    border-radius: 3px;
+    min-height: 4px;
+}
+progressbar progress {
+    background-color: #3d7ec2;
+    border-radius: 3px;
+    min-height: 4px;
+}
+scale trough {
+    background-color: #10141a;
+    border-radius: 4px;
+    min-height: 6px;
+}
+scale highlight {
+    background-color: #3d7ec2;
+    border-radius: 4px;
+}
+scale slider {
+    background-color: #cfd8e3;
+    border: 2px solid #3d7ec2;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+}
+button.icon-btn {
+    background-color: transparent;
+    color: #8594a6;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+button.icon-btn:hover {
+    background-color: #222a36;
+    color: #cfd8e3;
+    border-color: #2e394a;
+}
+button.flat-btn {
+    background-color: #272e3a;
+    color: #b8c4d2;
+    border: 1px solid #313a48;
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-weight: 600;
+}
+button.flat-btn:hover {
+    background-color: #283242;
+    border-color: #3e526b;
+    color: #dce4ee;
+}
+button.pwr-btn {
+    background-color: #20252e;
+    color: #b5c1cf;
+    border: 1px solid #252e3b;
+    border-radius: 8px;
+    padding: 8px 6px;
+    font-size: 12px;
+    font-weight: 600;
+}
+button.pwr-btn:hover {
+    background-color: #232c39;
+    border-color: #3a4c63;
+    color: #d8e1eb;
+}
+button.pwr-off:hover {
+    background-color: #3b2229;
+    border-color: #7d3a49;
+    color: #e6a8b2;
+}
+switch {
+    background-color: #10141a;
+    border: 1px solid #2b3545;
+    border-radius: 12px;
+    min-width: 38px;
+    min-height: 20px;
+}
+switch:checked {
+    background-color: #3b7fc4;
+    border-color: #4b9be5;
+}
+switch slider {
+    background-color: #c7d2df;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+}
+"""
+
+
+def run_cmd(cmd, timeout=0.6):
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True, timeout=timeout).strip()
+    except Exception:
+        return ""
+
+
+class QuickDrawer(Gtk.Window):
+    TARGET_MARGIN = 12
+    START_MARGIN = -340
+    ANIM_STEPS = 14
+
+    def __init__(self):
+        super().__init__(title="VaporOS Quick Drawer")
+        self.set_default_size(336, -1)
+        self.set_resizable(False)
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual is not None:
+            self.set_visual(visual)
+        self.set_opacity(0.0)
+
+        self._closing = False
+        self._anim_step = 0
+        self._anim_id = None
+        self._updating_ui = False
+        self._prev_cpu = self._read_cpu_times()
+
+        if HAS_LAYER_SHELL:
+            GtkLayerShell.init_for_window(self)
+            GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, 8)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, self.START_MARGIN)
+            GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.ON_DEMAND)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("key-press-event", self.on_key_press)
+        self.connect("destroy", self.on_destroy)
+
+        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        frame.get_style_context().add_class("drawer-frame")
+        self.add(frame)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_border_width(14)
+        frame.pack_start(root, True, True, 0)
+
+        # --- Minimal Header ---
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        brand = Gtk.Label(label="VaporOS", xalign=0)
+        brand.get_style_context().add_class("brand")
+
+        ctl_btn = Gtk.Button(label="")
+        ctl_btn.set_tooltip_text("Настройки VaporOS")
+        ctl_btn.get_style_context().add_class("icon-btn")
+        ctl_btn.connect("clicked", lambda *_: self.launch_and_close(["/usr/local/bin/vaporos-settings"]))
+
+        close_btn = Gtk.Button(label="✕")
+        close_btn.set_tooltip_text("Закрыть (Esc)")
+        close_btn.get_style_context().add_class("icon-btn")
+        close_btn.connect("clicked", lambda *_: self.animate_close())
+
+        hdr.pack_start(brand, True, True, 0)
+        hdr.pack_end(close_btn, False, False, 0)
+        hdr.pack_end(ctl_btn, False, False, 0)
+        root.pack_start(hdr, False, False, 0)
+
+        # --- Separate CPU & RAM Telemetry Row ---
+        stats = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        stats.set_homogeneous(True)
+
+        cpu_tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        cpu_tile.get_style_context().add_class("tile-compact")
+        cpu_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        cl = Gtk.Label(label="  CPU", xalign=0)
+        cl.get_style_context().add_class("section-lbl")
+        self.cpu_val = Gtk.Label(label="0%", xalign=1)
+        self.cpu_val.get_style_context().add_class("metric-val")
+        cpu_hdr.pack_start(cl, True, True, 0)
+        cpu_hdr.pack_end(self.cpu_val, False, False, 0)
+        self.cpu_bar = Gtk.ProgressBar()
+        cpu_tile.pack_start(cpu_hdr, False, False, 0)
+        cpu_tile.pack_start(self.cpu_bar, False, False, 0)
+
+        ram_tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        ram_tile.get_style_context().add_class("tile-compact")
+        ram_hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        rl = Gtk.Label(label="  RAM", xalign=0)
+        rl.get_style_context().add_class("section-lbl")
+        self.ram_val = Gtk.Label(label="0.0G", xalign=1)
+        self.ram_val.get_style_context().add_class("metric-val")
+        ram_hdr.pack_start(rl, True, True, 0)
+        ram_hdr.pack_end(self.ram_val, False, False, 0)
+        self.ram_bar = Gtk.ProgressBar()
+        ram_tile.pack_start(ram_hdr, False, False, 0)
+        ram_tile.pack_start(self.ram_bar, False, False, 0)
+
+        stats.pack_start(cpu_tile, True, True, 0)
+        stats.pack_start(ram_tile, True, True, 0)
+        root.pack_start(stats, False, False, 0)
+
+        # --- Audio Tile ---
+        aud_tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        aud_tile.get_style_context().add_class("tile")
+        aud_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        al = Gtk.Label(label="Звук", xalign=0)
+        al.get_style_context().add_class("section-lbl")
+        self.vol_lbl = Gtk.Label(label="40%", xalign=1)
+        self.vol_lbl.get_style_context().add_class("metric-val")
+        aud_top.pack_start(al, True, True, 0)
+        aud_top.pack_end(self.vol_lbl, False, False, 0)
+
+        aud_ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.mute_btn = Gtk.Button(label="")
+        self.mute_btn.get_style_context().add_class("icon-btn")
+        self.mute_btn.connect("clicked", self.on_mute_clicked)
+        self.vol_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 150, 5)
+        self.vol_scale.set_draw_value(False)
+        self.vol_scale.connect("value-changed", self.on_vol_changed)
+        aud_ctrl.pack_start(self.mute_btn, False, False, 0)
+        aud_ctrl.pack_start(self.vol_scale, True, True, 0)
+
+        aud_tile.pack_start(aud_top, False, False, 0)
+        aud_tile.pack_start(aud_ctrl, False, False, 0)
+        root.pack_start(aud_tile, False, False, 0)
+
+        # --- Network & Bluetooth Tiles ---
+        net_tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        net_tile.get_style_context().add_class("tile")
+
+        wifi_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.net_lbl = Gtk.Label(label="󰈀  Сеть", xalign=0)
+        self.net_lbl.get_style_context().add_class("metric-val")
+        self.wifi_switch = Gtk.Switch()
+        self.wifi_switch.connect("state-set", self.on_wifi_toggle)
+        wifi_row.pack_start(self.net_lbl, True, True, 0)
+        wifi_row.pack_end(self.wifi_switch, False, False, 0)
+
+        bt_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.bt_lbl = Gtk.Label(label="  Bluetooth", xalign=0)
+        self.bt_lbl.get_style_context().add_class("metric-val")
+        self.bt_switch = Gtk.Switch()
+        self.bt_switch.connect("state-set", self.on_bt_toggle)
+        bt_row.pack_start(self.bt_lbl, True, True, 0)
+        bt_row.pack_end(self.bt_switch, False, False, 0)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn_row.set_homogeneous(True)
+
+        net_btn = Gtk.Button(label="󰖩  Сети")
+        net_btn.get_style_context().add_class("flat-btn")
+        net_btn.connect("clicked", lambda *_: self.launch_and_close(["/usr/local/bin/vaporos-netmgr"]))
+
+        bt_btn = Gtk.Button(label="  Bluetooth")
+        bt_btn.get_style_context().add_class("flat-btn")
+        bt_btn.connect("clicked", lambda *_: self.launch_and_close(["/usr/local/bin/vaporos-btmgr"]))
+
+        btn_row.pack_start(net_btn, True, True, 0)
+        btn_row.pack_start(bt_btn, True, True, 0)
+
+        net_tile.pack_start(wifi_row, False, False, 0)
+        net_tile.pack_start(bt_row, False, False, 0)
+        net_tile.pack_start(btn_row, False, False, 0)
+        root.pack_start(net_tile, False, False, 0)
+
+        # --- Divider ---
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.get_style_context().add_class("divider")
+        root.pack_start(sep, False, False, 2)
+
+        # --- Power Row: Sleep, Reboot, Power Off ---
+        pwr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        pwr.set_homogeneous(True)
+
+        sleep_btn = Gtk.Button(label="󰤄  Сон")
+        sleep_btn.get_style_context().add_class("pwr-btn")
+        sleep_btn.connect("clicked", lambda *_: self.launch_and_close(["systemctl", "suspend"]))
+
+        reb_btn = Gtk.Button(label="󰜉  Ребут")
+        reb_btn.get_style_context().add_class("pwr-btn")
+        reb_btn.connect("clicked", lambda *_: subprocess.Popen(["systemctl", "reboot"]))
+
+        off_btn = Gtk.Button(label="⏻  Выкл")
+        off_btn.get_style_context().add_class("pwr-btn")
+        off_btn.get_style_context().add_class("pwr-off")
+        off_btn.connect("clicked", lambda *_: subprocess.Popen(["systemctl", "poweroff"]))
+
+        pwr.pack_start(sleep_btn, True, True, 0)
+        pwr.pack_start(reb_btn, True, True, 0)
+        pwr.pack_start(off_btn, True, True, 0)
+        root.pack_start(pwr, False, False, 0)
+
+        self.refresh_all()
+        GLib.timeout_add(1500, self.refresh_stats)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._on_sigusr1)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self._on_sigusr1)
+
+        self.show_all()
+        self.animate_open()
+
+    # --- Smooth 60fps cubic-out slide + fade animation ---
+    def animate_open(self):
+        self._closing = False
+        self._anim_step = 0
+        if self._anim_id:
+            GLib.source_remove(self._anim_id)
+        self._anim_id = GLib.timeout_add(14, self._tick_open)
+
+    def _tick_open(self):
+        self._anim_step += 1
+        t = min(1.0, self._anim_step / self.ANIM_STEPS)
+        ease = 1.0 - (1.0 - t) ** 3  # cubic-out
+        self.set_opacity(0.98 * ease)
+        if HAS_LAYER_SHELL:
+            margin = int(self.START_MARGIN + (self.TARGET_MARGIN - self.START_MARGIN) * ease)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, margin)
+        if t >= 1.0:
+            self._anim_id = None
+            return False
+        return True
+
+    def animate_close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._anim_step = 0
+        if self._anim_id:
+            GLib.source_remove(self._anim_id)
+        self._anim_id = GLib.timeout_add(12, self._tick_close)
+
+    def _tick_close(self):
+        self._anim_step += 1
+        t = min(1.0, self._anim_step / 10.0)
+        ease = t * t  # ease-in
+        self.set_opacity(max(0.0, 0.98 * (1.0 - ease)))
+        if HAS_LAYER_SHELL:
+            margin = int(self.TARGET_MARGIN + (self.START_MARGIN - self.TARGET_MARGIN) * ease)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, margin)
+        if t >= 1.0:
+            self._anim_id = None
+            self.close()
+            return False
+        return True
+
+    def _on_sigusr1(self):
+        self.animate_close()
+        return True
+
+    def on_key_press(self, _w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self.animate_close()
+            return True
+        return False
+
+    def on_destroy(self, *_):
+        try:
+            os.remove(PID_FILE)
+        except OSError:
+            pass
+        Gtk.main_quit()
+
+    def launch_and_close(self, cmd):
+        subprocess.Popen(cmd, start_new_session=True)
+        self.animate_close()
+
+    def _read_cpu_times(self):
+        try:
+            with open("/proc/stat", "r") as f:
+                parts = list(map(int, f.readline().split()[1:8]))
+            return parts[3] + parts[4], sum(parts)
+        except Exception:
+            return 0, 1
+
+    def refresh_stats(self):
+        if self._closing:
+            return False
+        idle, total = self._read_cpu_times()
+        p_idle, p_total = self._prev_cpu
+        d_total = max(1, total - p_total)
+        d_idle = max(0, idle - p_idle)
+        cpu_pct = max(0.0, min(100.0, 100.0 * (1.0 - d_idle / d_total)))
+        self._prev_cpu = (idle, total)
+        self.cpu_val.set_text(f"{cpu_pct:.0f}%")
+        self.cpu_bar.set_fraction(cpu_pct / 100.0)
+
+        try:
+            mem = {}
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    mem[k] = int(v.strip().split()[0])
+            total_k = mem.get("MemTotal", 1)
+            used_k = max(0, total_k - mem.get("MemAvailable", 0))
+            self.ram_val.set_text(f"{used_k/(1024*1024):.1f}/{total_k/(1024*1024):.1f}G")
+            self.ram_bar.set_fraction(min(1.0, used_k / total_k))
+        except Exception:
+            pass
+        return True
+
+    def refresh_all(self):
+        self._updating_ui = True
+        self.refresh_stats()
+
+        out = run_cmd(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        if "Volume:" in out:
+            try:
+                val = float(out.split()[1]) * 100.0
+                muted = "[MUTED]" in out
+                self.vol_scale.set_value(val)
+                self.vol_lbl.set_text("MUTE" if muted else f"{int(round(val))}%")
+                self.mute_btn.set_label("" if muted else "")
+            except Exception:
+                pass
+
+        wifi_state = run_cmd(["nmcli", "radio", "wifi"])
+        self.wifi_switch.set_active(wifi_state == "enabled")
+        active_conn = run_cmd(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"])
+        first = active_conn.splitlines()[0] if active_conn else ""
+        if first:
+            cname = first.split(":")[0]
+            self.net_lbl.set_text(f"󰈀  {cname[:16]}")
+        else:
+            self.net_lbl.set_text("󰤭  Нет сети")
+
+        has_bt = os.path.isdir("/sys/class/bluetooth") and bool(os.listdir("/sys/class/bluetooth"))
+        if has_bt:
+            bt_out = run_cmd(["bluetoothctl", "show"], timeout=0.5)
+            self.bt_switch.set_sensitive(True)
+            self.bt_switch.set_active("Powered: yes" in bt_out)
+        else:
+            self.bt_lbl.set_text("  Bluetooth (нет)")
+            self.bt_switch.set_active(False)
+            self.bt_switch.set_sensitive(False)
+
+        self._updating_ui = False
+
+    def on_vol_changed(self, scale):
+        if self._updating_ui:
+            return
+        pct = int(round(scale.get_value()))
+        subprocess.Popen(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{pct}%"])
+        self.vol_lbl.set_text(f"{pct}%")
+
+    def on_mute_clicked(self, *_):
+        subprocess.run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"], stderr=subprocess.DEVNULL)
+        self.refresh_all()
+
+    def on_wifi_toggle(self, _sw, state):
+        if self._updating_ui:
+            return False
+        subprocess.Popen(["nmcli", "radio", "wifi", "on" if state else "off"])
+        return False
+
+    def on_bt_toggle(self, _sw, state):
+        if self._updating_ui:
+            return False
+        subprocess.Popen(["bluetoothctl", "power", "on" if state else "off"])
+        return False
+
+
+if __name__ == "__main__":
+    QuickDrawer()
+    Gtk.main()

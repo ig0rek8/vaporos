@@ -1,0 +1,597 @@
+#!/usr/bin/env python3
+"""
+VaporOS Settings — Clean, restrained native desktop settings UI.
+Sans-serif typography, grouped preference rows, switches, segmented controls, zero bloat.
+"""
+import os
+import subprocess
+import threading
+import time
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GLib
+
+
+CSS = b"""
+* {
+    background-image: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    box-shadow: none;
+}
+window, dialog {
+    background-color: #191d24;
+    color: #d0d7e0;
+    font-family: "Adwaita Sans", "DejaVu Sans", sans-serif;
+    font-size: 13px;
+}
+.sidebar {
+    background-color: #14171c;
+    border-right: 1px solid #222731;
+    padding: 14px 10px;
+}
+.sidebar-hdr {
+    font-size: 13px;
+    font-weight: 700;
+    color: #8b95a5;
+    padding: 4px 10px 12px 10px;
+}
+button.nav-item {
+    background-color: transparent;
+    color: #9ba5b4;
+    border: none;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-weight: 500;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+button.nav-item:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #d6dde6;
+}
+button.nav-item.active {
+    background-color: #252c37;
+    color: #e2e8f0;
+    font-weight: 600;
+}
+.page-hdr {
+    font-size: 18px;
+    font-weight: 700;
+    color: #dde3ec;
+    margin-bottom: 10px;
+}
+.group-hdr {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #7c8796;
+    margin-top: 8px;
+    margin-bottom: 4px;
+    margin-left: 2px;
+}
+.group {
+    background-color: #20252e;
+    border-radius: 10px;
+    border: 1px solid #282e39;
+}
+.pref-row {
+    padding: 11px 14px;
+}
+.row-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #d2d9e2;
+}
+.row-desc {
+    font-size: 11.5px;
+    color: #7e8896;
+}
+.mono-val {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 12px;
+    color: #98a4b3;
+}
+separator.row-sep {
+    background-color: #282e39;
+    min-height: 1px;
+}
+button.quiet-btn {
+    background-color: #2a313d;
+    color: #cfd7e1;
+    border: 1px solid #343d4c;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: background-color 120ms ease;
+}
+button.quiet-btn:hover {
+    background-color: #343d4c;
+    color: #e4eaf2;
+}
+button.accent-btn {
+    background-color: #2c6299;
+    color: #e2ecf6;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+button.accent-btn:hover {
+    background-color: #3574b5;
+}
+.seg-box {
+    background-color: #161a20;
+    border-radius: 7px;
+    padding: 2px;
+    border: 1px solid #282e39;
+}
+button.seg-btn {
+    background-color: transparent;
+    color: #8f99a8;
+    border: none;
+    border-radius: 5px;
+    padding: 4px 11px;
+    font-size: 12px;
+    font-weight: 500;
+}
+button.seg-btn:hover {
+    color: #d0d7e0;
+}
+button.seg-btn.selected {
+    background-color: #2c3442;
+    color: #e2e8f0;
+    font-weight: 600;
+}
+button.swatch {
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: 6px;
+    border: 2px solid #353e4d;
+    padding: 0;
+}
+button.swatch:hover {
+    border-color: #6b8eb3;
+}
+switch {
+    background-color: #14181e;
+    border: 1px solid #303846;
+    border-radius: 12px;
+    min-width: 40px;
+    min-height: 22px;
+}
+switch:checked {
+    background-color: #3570ad;
+    border-color: #4687c9;
+}
+switch slider {
+    background-color: #cfd7e1;
+    border-radius: 50%;
+    min-width: 16px;
+    min-height: 16px;
+}
+progressbar trough {
+    background-color: #14181e;
+    border-radius: 3px;
+    min-height: 5px;
+}
+progressbar progress {
+    background-color: #3d7ec2;
+    border-radius: 3px;
+    min-height: 5px;
+}
+scrolledwindow, viewport {
+    background-color: #191d24;
+    border: none;
+}
+"""
+
+
+def run_out(cmd, timeout=2.0):
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True, timeout=timeout).strip()
+    except Exception:
+        return ""
+
+
+def notify(title, body):
+    subprocess.Popen(["notify-send", title, body], stderr=subprocess.DEVNULL)
+
+
+class VaporSettings(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Настройки VaporOS")
+        self.set_default_size(760, 510)
+        self.set_position(Gtk.WindowPosition.CENTER)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.connect("key-press-event", lambda _w, e: self.close() if e.keyval == Gdk.KEY_Escape else False)
+        self.connect("destroy", Gtk.main_quit)
+
+        self.rgb_running = False
+        self.scale_btns = {}
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add(outer)
+
+        # Sidebar
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        sidebar.set_size_request(195, -1)
+        sidebar.get_style_context().add_class("sidebar")
+
+        sh = Gtk.Label(label="Настройки", xalign=0)
+        sh.get_style_context().add_class("sidebar-hdr")
+        sidebar.pack_start(sh, False, False, 0)
+
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(120)
+
+        self.nav_buttons = {}
+        tabs = [
+            ("display", "Экран и фон", self.build_display),
+            ("system", "Память и игры", self.build_system),
+            ("network", "Сеть и устройства", self.build_network),
+            ("lab", "Эксперименты", self.build_lab),
+            ("about", "О системе", self.build_about),
+        ]
+
+        for key, label, builder in tabs:
+            self.stack.add_named(builder(), key)
+            btn = Gtk.Button(label=label)
+            btn.get_child().set_xalign(0.0)
+            btn.get_style_context().add_class("nav-item")
+            btn.connect("clicked", lambda _b, k=key: self.select_tab(k))
+            sidebar.pack_start(btn, False, False, 0)
+            self.nav_buttons[key] = btn
+
+        outer.pack_start(sidebar, False, False, 0)
+
+        sc = Gtk.ScrolledWindow()
+        sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sc.add(self.stack)
+        outer.pack_start(sc, True, True, 0)
+
+        self.select_tab("display")
+        self.show_all()
+
+    def select_tab(self, key):
+        self.stack.set_visible_child_name(key)
+        for k, b in self.nav_buttons.items():
+            ctx = b.get_style_context()
+            if k == key:
+                ctx.add_class("active")
+            else:
+                ctx.remove_class("active")
+
+    def page_box(self, title):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_border_width(24)
+        h = Gtk.Label(label=title, xalign=0)
+        h.get_style_context().add_class("page-hdr")
+        box.pack_start(h, False, False, 0)
+        return box
+
+    def section(self, parent, heading, rows):
+        if heading:
+            hl = Gtk.Label(label=heading, xalign=0)
+            hl.get_style_context().add_class("group-hdr")
+            parent.pack_start(hl, False, False, 0)
+        grp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        grp.get_style_context().add_class("group")
+        for idx, row in enumerate(rows):
+            if idx > 0:
+                sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                sep.get_style_context().add_class("row-sep")
+                grp.pack_start(sep, False, False, 0)
+            grp.pack_start(row, False, False, 0)
+        parent.pack_start(grp, False, False, 4)
+
+    def pref_row(self, title, desc, right_widget):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.get_style_context().add_class("pref-row")
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        t = Gtk.Label(label=title, xalign=0)
+        t.get_style_context().add_class("row-title")
+        left.pack_start(t, False, False, 0)
+        if desc:
+            d = Gtk.Label(label=desc, xalign=0)
+            d.get_style_context().add_class("row-desc")
+            left.pack_start(d, False, False, 0)
+        right_widget.set_valign(Gtk.Align.CENTER)
+        row.pack_start(left, True, True, 0)
+        row.pack_end(right_widget, False, False, 0)
+        return row
+
+    # --- PAGE 1: DISPLAY ---
+    def build_display(self):
+        p = self.page_box("Экран и фон")
+
+        pick_btn = Gtk.Button(label="Выбрать файл")
+        pick_btn.get_style_context().add_class("quiet-btn")
+        pick_btn.connect("clicked", self.pick_wallpaper)
+
+        swatches = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for hexcol in ("#0e1318", "#171a21", "#101b27", "#111c19", "#0a0c0f"):
+            b = Gtk.Button()
+            b.get_style_context().add_class("swatch")
+            css_p = Gtk.CssProvider()
+            css_p.load_from_data(f"button {{ background-color: {hexcol}; }}".encode())
+            b.get_style_context().add_provider(css_p, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+            b.set_tooltip_text(hexcol)
+            b.connect("clicked", lambda _b, h=hexcol: self.apply_wall(f"color:{h}"))
+            swatches.pack_start(b, False, False, 0)
+
+        self.section(p, "ОБОИ", [
+            self.pref_row("Изображение рабочего стола", "PNG, JPG или WEBP с сохранением после перезагрузки", pick_btn),
+            self.pref_row("Сплошной фон", "Спокойные матовые оттенки без нагрузки на ОЗУ", swatches),
+        ])
+
+        seg = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        seg.get_style_context().add_class("seg-box")
+        for lbl, val in [("100%", "1"), ("125%", "1.25"), ("150%", "1.5")]:
+            sb = Gtk.Button(label=lbl)
+            sb.get_style_context().add_class("seg-btn")
+            if val == "1":
+                sb.get_style_context().add_class("selected")
+            sb.connect("clicked", lambda _b, v=val: self.set_scale(v))
+            seg.pack_start(sb, False, False, 0)
+            self.scale_btns[val] = sb
+
+        dock_sw = Gtk.Switch()
+        dock_running = subprocess.run(["pgrep", "-f", "vaporos-dock"], stdout=subprocess.DEVNULL).returncode == 0
+        dock_sw.set_active(dock_running)
+        dock_sw.connect("state-set", self.on_dock_toggle)
+
+        self.section(p, "ИНТЕРФЕЙС", [
+            self.pref_row("Масштаб экрана", "Размер шрифтов и элементов интерфейса", seg),
+            self.pref_row("Нижняя панель (Док)", "Отображать плавающую панель приложений снизу", dock_sw),
+        ])
+        return p
+
+    def set_scale(self, val):
+        subprocess.Popen(["swaymsg", "output", "*", "scale", val])
+        for v, b in self.scale_btns.items():
+            ctx = b.get_style_context()
+            if v == val:
+                ctx.add_class("selected")
+            else:
+                ctx.remove_class("selected")
+
+    def apply_wall(self, spec):
+        os.makedirs(os.path.expanduser("~/.config/vaporos"), exist_ok=True)
+        with open(os.path.expanduser("~/.config/vaporos/wallpaper"), "w") as f:
+            f.write(spec + "\n")
+        subprocess.Popen(["/usr/local/bin/vaporos-wallpaper", "--restore"])
+
+    def pick_wallpaper(self, *_):
+        dlg = Gtk.FileChooserDialog(title="Выберите обои", parent=self, action=Gtk.FileChooserAction.OPEN)
+        dlg.add_buttons("Отмена", Gtk.ResponseType.CANCEL, "Применить", Gtk.ResponseType.OK)
+        flt = Gtk.FileFilter()
+        flt.set_name("Изображения")
+        for pat in ("*.png", "*.jpg", "*.jpeg", "*.webp"):
+            flt.add_pattern(pat)
+        dlg.add_filter(flt)
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            if path:
+                self.apply_wall(path)
+        dlg.destroy()
+
+    def on_dock_toggle(self, _sw, state):
+        if state:
+            subprocess.Popen(["/usr/local/bin/vaporos-dock"], start_new_session=True)
+        else:
+            subprocess.Popen(["pkill", "-f", "^/usr/bin/python3.*vaporos-dock"])
+        return False
+
+    # --- PAGE 2: SYSTEM & GAMING ---
+    def build_system(self):
+        p = self.page_box("Память и игры")
+
+        self.ram_lbl = Gtk.Label(label=self.get_ram_short())
+        self.ram_lbl.get_style_context().add_class("mono-val")
+
+        drop_btn = Gtk.Button(label="Очистить")
+        drop_btn.get_style_context().add_class("quiet-btn")
+        drop_btn.connect("clicked", self.on_drop_caches)
+
+        self.section(p, "ПАМЯТЬ", [
+            self.pref_row("Текущее потребление ОЗУ", "Физическая память и сжатый раздел zram0", self.ram_lbl),
+            self.pref_row("Страничный кэш", "Освободить неиспользуемый кэш диска", drop_btn),
+        ])
+
+        gm_btn = Gtk.Button(label="Перейти")
+        gm_btn.get_style_context().add_class("accent-btn")
+        gm_btn.connect("clicked", lambda *_: subprocess.Popen(["/usr/local/bin/vaporos-switch-session", "gaming"]))
+
+        upd_btn = Gtk.Button(label="Обновить")
+        upd_btn.get_style_context().add_class("quiet-btn")
+        upd_btn.connect("clicked", lambda *_: subprocess.Popen(
+            ["foot", "-T", "Обновление Arch Linux", "bash", "-c", "sudo pacman -Syu; read -p 'Готово. Enter...'"]
+        ))
+
+        self.section(p, "СИСТЕМА", [
+            self.pref_row("Игровой режим", "Перезапустить сессию в Steam Big Picture", gm_btn),
+            self.pref_row("Обновление пакетов", "Запустить полное обновление Arch (pacman -Syu)", upd_btn),
+        ])
+        return p
+
+    def get_ram_short(self):
+        out = run_out(["free", "-h"])
+        for line in out.splitlines():
+            if line.startswith("Mem:"):
+                parts = line.split()
+                return f"{parts[2]} / {parts[1]}"
+        return "n/a"
+
+    def on_drop_caches(self, *_):
+        subprocess.run(["bash", "-c", "sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null"])
+        self.ram_lbl.set_text(self.get_ram_short())
+
+    # --- PAGE 3: NETWORK & DEVICES ---
+    def build_network(self):
+        p = self.page_box("Сеть и устройства")
+
+        ip_lbl = Gtk.Label(label=run_out(["hostname", "-I"]) or "—")
+        ip_lbl.get_style_context().add_class("mono-val")
+
+        net_btn = Gtk.Button(label="Открыть")
+        net_btn.get_style_context().add_class("quiet-btn")
+        net_btn.connect("clicked", lambda *_: subprocess.Popen(["/usr/local/bin/vaporos-netmgr"], start_new_session=True))
+
+        bt_btn = Gtk.Button(label="Открыть")
+        bt_btn.get_style_context().add_class("quiet-btn")
+        bt_btn.connect("clicked", lambda *_: subprocess.Popen(["/usr/local/bin/vaporos-btmgr"], start_new_session=True))
+
+        self.section(p, "ПОДКЛЮЧЕНИЯ", [
+            self.pref_row("IP-адрес", "Текущий локальный адрес в сети", ip_lbl),
+            self.pref_row("Сети и Wi-Fi", "Выбор точки доступа и статус Ethernet", net_btn),
+            self.pref_row("Bluetooth", "Геймпады, наушники и периферия", bt_btn),
+        ])
+        return p
+
+    # --- PAGE 4: LAB / FUN (presented deadpan like real OS settings!) ---
+    def build_lab(self):
+        p = self.page_box("Эксперименты")
+
+        flip_sw = Gtk.Switch()
+        flip_sw.connect("state-set", self.on_flip)
+
+        rgb_sw = Gtk.Switch()
+        rgb_sw.connect("state-set", self.on_rgb)
+
+        pot_sw = Gtk.Switch()
+        pot_sw.connect("state-set", self.on_potato)
+
+        self.section(p, "ВИЗУАЛЬНЫЕ ЭФФЕКТЫ", [
+            self.pref_row("Австралийский режим", "Перевернуть изображение на 180°", flip_sw),
+            self.pref_row("RGB-подсветка окон", "Киберспортивное переливание рамки (+100 FPS)", rgb_sw),
+            self.pref_row("Режим картофельного ПК", "Укрупнённый масштаб и +300% морального FPS", pot_sw),
+        ])
+
+        hack_btn = Gtk.Button(label="Запустить")
+        hack_btn.get_style_context().add_class("quiet-btn")
+        hack_btn.connect("clicked", self.on_hacker)
+
+        ram_btn = Gtk.Button(label="Скачать 64 ГБ")
+        ram_btn.get_style_context().add_class("quiet-btn")
+        ram_btn.connect("clicked", self.on_download_ram)
+
+        self.ram_prog = Gtk.ProgressBar()
+        self.ram_prog.set_no_show_all(True)
+        self.ram_prog.hide()
+        self.ram_note = Gtk.Label(label="Увеличить объём DDR5 напрямую с серверов Valve", xalign=0)
+        self.ram_note.get_style_context().add_class("row-desc")
+
+        ram_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        ram_row.get_style_context().add_class("pref-row")
+        ram_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        ram_left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        rt = Gtk.Label(label="Загрузка дополнительной ОЗУ", xalign=0)
+        rt.get_style_context().add_class("row-title")
+        ram_left.pack_start(rt, False, False, 0)
+        ram_left.pack_start(self.ram_note, False, False, 0)
+        ram_btn.set_valign(Gtk.Align.CENTER)
+        ram_top.pack_start(ram_left, True, True, 0)
+        ram_top.pack_end(ram_btn, False, False, 0)
+        ram_row.pack_start(ram_top, False, False, 0)
+        ram_row.pack_start(self.ram_prog, False, False, 0)
+
+        self.section(p, "УТИЛИТЫ", [
+            self.pref_row("Терминал хакера", "Имитация взлома серверов Half-Life 3 в окне", hack_btn),
+            ram_row,
+        ])
+        return p
+
+    def on_flip(self, _sw, state):
+        subprocess.Popen(["swaymsg", "output", "*", "transform", "180" if state else "normal"])
+        return False
+
+    def on_rgb(self, _sw, state):
+        self.rgb_running = state
+        if not state:
+            subprocess.Popen(["swaymsg", "client.focused", "#2f4157", "#181e26", "#cfd8e3", "#4b9be5", "#2f4157"])
+            return False
+        colors = ["#d9536f", "#e08e45", "#d4b459", "#46a89a", "#4b9be5", "#8a6be0"]
+
+        def loop():
+            i = 0
+            while self.rgb_running:
+                c = colors[i % len(colors)]
+                subprocess.run(["swaymsg", "client.focused", c, "#181e26", "#cfd8e3", c, c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                i += 1
+                time.sleep(0.2)
+            subprocess.run(["swaymsg", "client.focused", "#2f4157", "#181e26", "#cfd8e3", "#4b9be5", "#2f4157"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        threading.Thread(target=loop, daemon=True).start()
+        return False
+
+    def on_potato(self, _sw, state):
+        self.set_scale("1.25" if state else "1")
+        if state:
+            notify("VaporOS", "Режим картофельного ПК активен (+300% моральных FPS)")
+        return False
+
+    def on_hacker(self, *_):
+        script = (
+            "clear; echo -e '\\033[1;32m[VAPOROS KERNEL OVERRIDE]\\033[0m'; sleep 0.5; "
+            "for msg in 'Подключение к серверам Valve...' 'Поиск сборки Half-Life 3...' "
+            "'Расшифровка SteamOS 4.0...' 'Доступ разрешён (шутка, это просто Arch)'; do "
+            "echo -e \"\\033[0;32m> $msg\\033[0m\"; sleep 0.75; done; "
+            "echo ''; dmesg 2>/dev/null | tail -n 10 | sed 's/^/\\x1b[32m[OK] /; s/$/\\x1b[0m/'; "
+            "echo ''; read -p 'Enter для выхода...'"
+        )
+        subprocess.Popen(["foot", "-T", "Terminal", "bash", "-c", script], start_new_session=True)
+
+    def on_download_ram(self, *_):
+        self.ram_prog.show()
+
+        def worker():
+            steps = [
+                (0.20, "Подбор таймингов DDR5-8000..."),
+                (0.55, "Загрузка 64 ГБ по сети (сжатие 999%)..."),
+                (0.85, "Монтирование виртуальных слотов DIMM..."),
+                (1.00, "Готово. (Шутка, но zram реально сжимает твою ОЗУ)"),
+            ]
+            for frac, msg in steps:
+                GLib.idle_add(self.ram_prog.set_fraction, frac)
+                GLib.idle_add(self.ram_note.set_text, msg)
+                time.sleep(0.8)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # --- PAGE 5: ABOUT ---
+    def build_about(self):
+        p = self.page_box("О системе")
+        kernel = run_out(["uname", "-r"])
+        uptime = run_out(["uptime", "-p"])
+        cpu = run_out(["bash", "-c", "lscpu | grep 'Model name' | sed 's/.*: *//'"])
+        disk_lines = run_out(["df", "-h", "/"]).splitlines()
+        disk = f"{disk_lines[-1].split()[2]} / {disk_lines[-1].split()[1]}" if len(disk_lines) > 1 else "n/a"
+
+        rows = []
+        for k, v in [
+            ("Операционная система", "VaporOS (Arch Linux)"),
+            ("Ядро Linux", kernel),
+            ("Процессор", cpu[:42]),
+            ("Занято на диске (/)", disk),
+            ("Время работы", uptime),
+        ]:
+            vl = Gtk.Label(label=v)
+            vl.get_style_context().add_class("mono-val")
+            rows.append(self.pref_row(k, None, vl))
+
+        self.section(p, "СВЕДЕНИЯ", rows)
+        return p
+
+
+if __name__ == "__main__":
+    VaporSettings()
+    Gtk.main()
